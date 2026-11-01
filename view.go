@@ -235,6 +235,47 @@ func (b *board) agentRow(c *ui.Context, p palette, name, label string) {
 			ui.Text(c, fmt.Sprint(n)).FontSize(11).TextColor(p.muted).FontFeatures("tnum")
 		})
 		ui.Text(c, tokens(total)+" tokens"+cost(u.CostUSD)).FontSize(11).Font("monospace").TextColor(p.muted).Padding(0, 0, 0, 18)
+		if q := b.quotas[name]; q != nil {
+			quotaView(c, p, q)
+		}
+	})
+}
+
+// quotaView shows an agent's plan windows: how much is used, and when each
+// resets.
+func quotaView(c *ui.Context, p palette, q *Quota) {
+	ui.Column(c).Gap(3).Padding(3, 0, 0, 18).Children(func() {
+		if q.Err != "" {
+			ui.Text(c, q.Err).FontSize(10.5).TextColor(p.muted).MaxLines(2).Wrap()
+			return
+		}
+		for i, w := range q.Windows {
+			if i == 3 {
+				break
+			}
+			color := p.brand
+			switch {
+			case w.Used >= 85:
+				color = p.red
+			case w.Used >= 60:
+				color = p.amber
+			}
+			tip := fmt.Sprintf("%s: %.0f%% used", w.Label, w.Used)
+			if !w.ResetsAt.IsZero() {
+				tip += ", resets " + w.ResetsAt.Local().Format("Mon 15:04")
+			}
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Tooltip(tip).Children(func() {
+				ui.Text(c, w.Label).FontSize(10.5).TextColor(p.muted).Width(44).MaxLines(1)
+				ui.Box(c).Width(64).Height(4).Radius(2).Background(p.ink.Alpha(0.08)).Children(func() {
+					ui.Box(c).Width(64 * float32(w.Used) / 100).Height(4).Radius(2).Background(color)
+				})
+				ui.Text(c, fmt.Sprintf("%.0f%%", w.Used)).FontSize(10.5).Font("monospace").FontFeatures("tnum").Width(30)
+				ui.Text(c, until(w.ResetsAt)).FontSize(10.5).TextColor(p.muted).MaxLines(1)
+			})
+		}
+		if age := time.Since(q.At); age > time.Hour {
+			ui.Text(c, "as of "+ago(q.At)+" ago").FontSize(10).TextColor(p.muted)
+		}
 	})
 }
 

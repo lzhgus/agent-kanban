@@ -69,6 +69,11 @@ func readLog(t *testing.T, path string) []string {
 // to resume, or conv-1, replies, and exits once stdin closes.
 func fakeAgy() {
 	fakeLog("args %s", strings.Join(os.Args[1:], " "))
+	if slices.Contains(os.Args, "/usage") { // the quota probe: noise, then the JSON
+		fmt.Println("Loading…")
+		fmt.Println(`{"command":{"data":{"groups":[{"name":"Gemini Pro","buckets":[{"id":"pro","remaining_fraction":0.25,"window":"weekly","reset_time":"2030-01-02T03:04:05Z"},{"id":"off","disabled":true,"remaining_fraction":0}]}]}}}`)
+		return
+	}
 	conv := "conv-1"
 	if i := slices.Index(os.Args, "--conversation"); i > 0 && i+1 < len(os.Args) {
 		conv = os.Args[i+1]
@@ -128,6 +133,13 @@ func fakeCopilot() {
 				continue
 			}
 			reply(m.ID, map[string]any{})
+		case "auth.getStatus":
+			reply(m.ID, map[string]any{"isAuthenticated": true, "login": "octo"})
+		case "account.getQuota":
+			reply(m.ID, map[string]any{"quotaSnapshots": map[string]any{
+				"chat":                 map[string]any{"isUnlimitedEntitlement": true},
+				"premium_interactions": map[string]any{"remainingPercentage": 70.0, "resetDate": "2030-01-01T00:00:00Z"},
+			}})
 		case "session.send":
 			reply(m.ID, map[string]any{})
 			event("assistant.message", map[string]string{"messageId": "m1", "content": "re: " + m.Params.Prompt + " in " + m.Params.SessionID})

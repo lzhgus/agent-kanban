@@ -140,12 +140,14 @@ type board struct {
 	selected        *Task
 	tab             string // the detail pane's tab chosen; "" until one is
 	md              markdown.Options
-	diff            *diffPane  // the changes tab's files and diff
-	bridge          *bridge    // the MCP server agents reach the board through; nil without one
-	sessions        []*Session // from the watcher, replaced on each scan
-	selectedSession string     // its key
-	filter          string     // the agent the board shows; "" for all
-	composing       bool       // the new-task composer is open
+	diff            *diffPane         // the changes tab's files and diff
+	bridge          *bridge           // the MCP server agents reach the board through; nil without one
+	quotas          map[string]*Quota // each agent's plan windows, as last read
+	quotaKick       chan struct{}     // a turn ended: read the quotas again soon
+	sessions        []*Session        // from the watcher, replaced on each scan
+	selectedSession string            // its key
+	filter          string            // the agent the board shows; "" for all
+	composing       bool              // the new-task composer is open
 	runs            map[int]context.CancelFunc
 	queue           []*Task        // tasks whose turn waits for a slot, first come first
 	procs           sync.WaitGroup // drivers still running, for quitting
@@ -158,7 +160,7 @@ type board struct {
 }
 
 func newBoard(path string) *board {
-	b := &board{path: path, runs: map[int]context.CancelFunc{}, agent: agentNames[0], rounds: roundChoices[0],
+	b := &board{path: path, runs: map[int]context.CancelFunc{}, agent: agentNames[0], rounds: roundChoices[0], quotaKick: make(chan struct{}, 1),
 		worktrees: filepath.Join(filepath.Dir(path), "worktrees")}
 	if path == "" {
 		b.worktrees = filepath.Join(os.TempDir(), "agent-kanban-worktrees")
@@ -536,6 +538,26 @@ func commitMessage(t Task, turn int) string {
 	return fmt.Sprintf("%s: %s\n\nTurn %d of task #%d (%s).", t.Agent, subject, turn, t.ID, t.Title)
 }
 
+// watchQuotas reads the agents' quotas now, every quotaEvery, and soon
+// after a turn ends, though not more often than quotaAfter.
+func (b *board) watchQuotas(update func(func())) {
+	every := time.NewTicker(quotaEvery)
+	defer every.Stop()
+	var last time.Time
+	for {
+		if time.Since(last) >= quotaAfter {
+			last = time.Now()
+			q := probeQuotas()
+			update(func() { b.quotas = q })
+		}
+		select {
+		case <-every.C:
+		case <-b.quotaKick:
+			time.Sleep(10 * time.Second) // let the CLI record the turn first
+		}
+	}
+}
+
 // shared reports whether another task works in t's worktree, as a hand-off
 // does in the one it came from.
 func (b *board) shared(t *Task) bool {
@@ -582,6 +604,10 @@ func modelSuffix(m string) string {
 // before it; a plan rests at Confirm; work at Review.
 func (b *board) finish(t *Task, r result, err error, took time.Duration, before Status, o turnOpts, g turnGit) {
 	defer b.dispatch() // a slot is free: the next turn waiting takes it
+	select {           // what it spent shows in the quotas
+	case b.quotaKick <- struct{}{}:
+	default:
+	}
 	stopped := errors.Is(err, context.Canceled)
 	if cancel := b.runs[t.ID]; cancel != nil {
 		cancel()
@@ -807,6 +833,7 @@ func main() {
 			Content:        ui.View(b.view),
 		})
 		b.update = win.Update
+		go b.watchQuotas(win.Update)
 		go func() { // watch the agents run outside the board
 			w := newWatcher()
 			for {
