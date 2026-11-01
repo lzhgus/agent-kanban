@@ -78,6 +78,8 @@ type Task struct {
 	QueuedFrom Status
 	// The question its agent asked you (ask_user), until you answer.
 	Question *Question
+	// ByAgent: an agent filed it (create_todo); auto pickup plans it first.
+	ByAgent bool
 
 	resume   bool   // this turn continues SessionRef (the drivers' copy only)
 	readOnly bool   // this turn may read but not write (the drivers' copy only)
@@ -87,6 +89,7 @@ type Task struct {
 	pending  *queuedTurn // the turn waiting in the queue
 	mcpURL   string      // the board's MCP server for this turn (the drivers' copy only)
 	doing    string      // the running turn's kind, for its label
+	picked   bool        // auto pickup started its turn: its agent is busy with it
 }
 
 // Question is what an agent asked you: an answer is your next reply.
@@ -134,6 +137,8 @@ type board struct {
 	PlanFirst bool
 	// MaxRunning is how many turns run at once; more wait in the queue.
 	MaxRunning int
+	// AutoPickup: To Do tasks start by themselves as agents come free.
+	AutoPickup bool
 
 	path            string
 	worktrees       string // where tasks' worktrees go
@@ -148,6 +153,9 @@ type board struct {
 	selectedSession string            // its key
 	filter          string            // the agent the board shows; "" for all
 	composing       bool              // the new-task composer is open
+	quickAdding     bool              // the To Do column's quick add is open
+	quick           string            // its text
+	quickAgent      string            // and its agent
 	runs            map[int]context.CancelFunc
 	queue           []*Task        // tasks whose turn waits for a slot, first come first
 	procs           sync.WaitGroup // drivers still running, for quitting
@@ -227,17 +235,34 @@ func (b *board) add(run bool) {
 	if title == "" {
 		title = firstLine(prompt)
 	}
-	b.NextID++
-	t := &Task{ID: b.NextID, Title: title, Prompt: prompt, Agent: b.agent, Model: strings.TrimSpace(b.model), Dir: expandHome(strings.TrimSpace(b.dir)), Status: Todo, PlanFirst: b.PlanFirst}
-	b.Tasks = append(b.Tasks, t)
-	b.LastDir = t.Dir
+	t := b.file(title, prompt, b.agent, strings.TrimSpace(b.model))
 	b.title, b.prompt = "", ""
 	b.selected = t
 	if run {
 		b.start(t)
 	} else {
 		b.save()
+		b.autopick()
 	}
+}
+
+// file puts a task in To Do, in the folder of the form.
+func (b *board) file(title, prompt, agent, model string) *Task {
+	b.NextID++
+	t := &Task{ID: b.NextID, Title: title, Prompt: prompt, Agent: agent, Model: model, Dir: expandHome(strings.TrimSpace(b.dir)), Status: Todo, PlanFirst: b.PlanFirst}
+	b.Tasks = append(b.Tasks, t)
+	b.LastDir = t.Dir
+	return t
+}
+
+// quickAdd files a task from the To Do column: its first line is its title.
+func (b *board) quickAdd(text, agent string) {
+	if text = strings.TrimSpace(text); text == "" {
+		return
+	}
+	b.file(firstLine(text), text, agent, "")
+	b.save()
+	b.autopick()
 }
 
 // What the board tells an agent about planning and building.
@@ -265,6 +290,16 @@ type turnOpts struct {
 // start over that leaves the old conversation and branch behind. A task
 // that plans first plans again.
 func (b *board) start(t *Task) {
+	if t.Agent == anyAgent { // started by hand: whoever has the most of its plan left
+		a := b.pickAgent(false)
+		if a == "" {
+			t.Status, t.Err = Failed, "no agent is installed and signed in to take it"
+			b.save()
+			return
+		}
+		t.Agent = a
+		t.addLog("── given to " + a)
+	}
 	prompt := t.Prompt
 	if t.PlanFirst {
 		prompt += planNote
@@ -351,6 +386,7 @@ func (b *board) dequeue(t *Task) {
 func (b *board) setMaxRunning(n int) {
 	b.MaxRunning = min(max(n, 1), 10)
 	b.dispatch()
+	b.autopick()
 	b.save()
 }
 
@@ -548,7 +584,7 @@ func (b *board) watchQuotas(update func(func())) {
 		if time.Since(last) >= quotaAfter {
 			last = time.Now()
 			q := probeQuotas()
-			update(func() { b.quotas = q })
+			update(func() { b.quotas = q; b.autopick() })
 		}
 		select {
 		case <-every.C:
@@ -603,7 +639,8 @@ func modelSuffix(m string) string {
 // finish records a turn's outcome. A stopped turn rests where the task was
 // before it; a plan rests at Confirm; work at Review.
 func (b *board) finish(t *Task, r result, err error, took time.Duration, before Status, o turnOpts, g turnGit) {
-	defer b.dispatch() // a slot is free: the next turn waiting takes it
+	defer b.autopick() // then To Do, if Auto is on
+	defer b.dispatch() // a slot is free: the next turn waiting takes it first
 	select {           // what it spent shows in the quotas
 	case b.quotaKick <- struct{}{}:
 	default:
@@ -667,6 +704,9 @@ func (b *board) finish(t *Task, r result, err error, took time.Duration, before 
 	}
 	if o.revision {
 		b.afterRevision(t)
+	}
+	if !started(t) {
+		t.picked = false // its agent is free again
 	}
 	b.save()
 }

@@ -224,18 +224,17 @@ var bridgeTools = []bridgeTool{
 	{
 		name: "create_todo",
 		description: "File a new task on the board, for yourself or another agent (claude, antigravity, copilot), in the same folder as this one. " +
-			"Use it for follow-up work outside this task, or work another agent should do. With start, it runs right away; otherwise it waits in To Do.",
+			"Use it for follow-up work outside this task, or work another agent should do. With start, it runs right away; otherwise it waits in To Do. " +
+			"A task you file plans first: the user confirms its plan before it changes anything.",
 		schema: object(map[string]any{
-			"title":      str("A short title."),
-			"prompt":     str("What the agent should do, with the context it needs: it does not see this conversation."),
-			"agent":      map[string]any{"type": "string", "enum": agentNames, "description": "Who does it; this task's agent if left out."},
-			"plan_first": map[string]any{"type": "boolean", "description": "Plan, and wait for the user to confirm, before building."},
-			"start":      map[string]any{"type": "boolean", "description": "Run it right away."},
+			"title":  str("A short title."),
+			"prompt": str("What the agent should do, with the context it needs: it does not see this conversation."),
+			"agent":  map[string]any{"type": "string", "enum": agentChoices, "description": "Who does it: an agent, or any, whichever is free when it starts; this task's agent if left out."},
+			"start":  map[string]any{"type": "boolean", "description": "Run it right away."},
 		}, "title", "prompt"),
 		run: func(b *board, turn *bridgeTurn, args json.RawMessage) (string, error) {
 			var a struct {
 				Title, Prompt, Agent string
-				PlanFirst            bool `json:"plan_first"`
 				Start                bool
 			}
 			if err := json.Unmarshal(args, &a); err != nil || strings.TrimSpace(a.Prompt) == "" {
@@ -248,8 +247,8 @@ var bridgeTools = []bridgeTool{
 			if a.Agent == "" {
 				a.Agent = from.Agent
 			}
-			if drivers[a.Agent] == nil {
-				return "", fmt.Errorf("no agent %q: one of %s", a.Agent, strings.Join(agentNames, ", "))
+			if drivers[a.Agent] == nil && a.Agent != anyAgent {
+				return "", fmt.Errorf("no agent %q: one of %s", a.Agent, strings.Join(agentChoices, ", "))
 			}
 			title := strings.TrimSpace(a.Title)
 			if title == "" {
@@ -257,13 +256,14 @@ var bridgeTools = []bridgeTool{
 			}
 			turn.created++
 			b.NextID++
-			t := &Task{ID: b.NextID, Title: title, Prompt: strings.TrimSpace(a.Prompt), Agent: a.Agent, Dir: from.Dir, Status: Todo, From: from.ID, PlanFirst: a.PlanFirst}
+			t := &Task{ID: b.NextID, Title: title, Prompt: strings.TrimSpace(a.Prompt), Agent: a.Agent, Dir: from.Dir, Status: Todo, From: from.ID, PlanFirst: true, ByAgent: true} // a person confirms what agents file
 			b.Tasks = append(b.Tasks, t)
 			from.addLog(fmt.Sprintf("+ filed #%d for %s: %s", t.ID, t.Agent, title))
 			if a.Start {
 				b.start(t)
 			} else {
 				b.save()
+				b.autopick()
 			}
 			return fmt.Sprintf("Filed task #%d for %s: %s (%s).", t.ID, t.Agent, title, t.Status), nil
 		},

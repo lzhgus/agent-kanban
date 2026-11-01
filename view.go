@@ -352,7 +352,7 @@ func (b *board) composerView(c *ui.Context, p palette) {
 	ui.Column(c.Key("composer")).Margin(0, 12, 8, 12).Padding(12).Gap(10).Radius(10).Background(p.column).Children(func() {
 		ui.TextArea(c.Key("prompt"), &b.prompt).Placeholder("Describe the task. The agent works in the folder below.").Label("Prompt").Height(72).Radius(controlRadius).Background(p.pane)
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Select(c.Key("agent"), &b.agent, agentNames).Label("Agent").Width(130)
+			ui.Select(c.Key("agent"), &b.agent, agentChoices).Label("Agent").Width(130)
 			ui.TextInput(c.Key("model"), &b.model).Placeholder("Model (default)").Label("Model").Width(140)
 			ui.Row(c).Grow(1).MinWidth(0).Gap(6).AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, iconFolder).Size(14, 14).TextColor(p.muted)
@@ -413,21 +413,82 @@ func (b *board) columnView(c *ui.Context, p palette, s Status, tasks []*Task, se
 	if sess, ok := ui.Drop[*Session](col); ok {
 		b.moveSession(sess, s)
 	}
+	if s == Todo && col.DoubleClicked() { // a double click on the column, not on a card, adds a task
+		b.quickAdding = true
+	}
 	col.Children(func() {
 		ui.Row(c).Gap(7).AlignItems(ui.Center).Padding(0, 4, 2, 4).Tooltip(statusHint[s]).Children(func() {
 			statusDot(c, p.status(s), false)
 			ui.Text(c, string(s)).FontSize(12.5).Bold().MaxLines(1)
 			ui.Text(c, fmt.Sprint(len(tasks)+len(sessions))).FontSize(11.5).TextColor(p.muted).FontFeatures("tnum")
+			if s == Todo {
+				b.todoControls(c, p)
+			}
 		})
 		ui.Scroll(c).Grow(1).Gap(8).Padding(2).Children(func() {
+			if s == Todo && b.quickAdding {
+				b.quickAddView(c, p)
+			}
 			for _, t := range tasks {
 				b.cardView(c, p, t)
 			}
 			for _, sess := range sessions {
 				b.sessionCardView(c, p, sess)
 			}
-			if len(tasks)+len(sessions) == 0 {
-				ui.Text(c, "Nothing here").FontSize(11.5).TextColor(p.muted.Alpha(0.7)).Padding(14, 6)
+			if len(tasks)+len(sessions) == 0 && !(s == Todo && b.quickAdding) {
+				empty := "Nothing here"
+				if s == Todo {
+					empty = "Double-click to add a task"
+				}
+				ui.Text(c, empty).FontSize(11.5).TextColor(p.muted.Alpha(0.7)).Padding(14, 6)
+			}
+		})
+	})
+}
+
+// todoControls sit in the To Do column's header: a quick add, and Auto,
+// which has free agents pick its tasks up.
+func (b *board) todoControls(c *ui.Context, p palette) {
+	ui.Box(c).Grow(1)
+	if button(c, p, "quick-add", "", iconPlus, ghost).Label("Add a task").Tooltip("Add a task (or double-click the column)").Clicked() {
+		b.quickAdding = true
+	}
+	on := b.AutoPickup
+	ui.Row(c).Gap(5).AlignItems(ui.Center).Tooltip("Auto: free agents pick tasks up, first come first; one each. Tasks agents file plan first.").Children(func() {
+		ui.Text(c, "Auto").FontSize(11).TextColor(p.muted)
+		if ui.Switch(c.Key("auto"), &on).Label("Auto pickup").Changed() {
+			b.setAutoPickup(on)
+		}
+	})
+}
+
+// quickAddView files a task from the column: Enter adds it, Escape closes.
+func (b *board) quickAddView(c *ui.Context, p palette) {
+	if b.quickAgent == "" {
+		b.quickAgent = anyAgent
+	}
+	ui.Column(c.Key("quick-add")).Gap(8).Padding(10).Radius(10).Background(p.card).InsetShadow(0, 0, 0, 1, p.brand.Alpha(0.6)).Children(func() {
+		ui.TextArea(c.Key("quick-text"), &b.quick).Lines(2, 6).AutoFocus().Placeholder("What should an agent do?").Label("New task").
+			OnTextKey(func(k ui.TextKey) bool {
+				switch {
+				case k.Key == ui.KeyEnter && k.Mods == 0:
+					b.quickAdd(k.Text(), b.quickAgent)
+					k.SetText("")
+					b.quickAdding = false
+					return true
+				case k.Key == ui.KeyEscape:
+					b.quickAdding = false
+					return true
+				}
+				return false
+			})
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Select(c.Key("quick-agent"), &b.quickAgent, agentChoices).Label("Agent").Width(110)
+			ui.Text(c, "in "+filepath.Base(expandHome(b.dir))).FontSize(10.5).Font("monospace").TextColor(p.muted).MaxLines(1).Shrink(1).MinWidth(0).Tooltip(b.dir)
+			ui.Box(c).Grow(1)
+			if buttonIf(c, p, "quick-add-go", "Add", nil, primary, strings.TrimSpace(b.quick) == "").Clicked() {
+				b.quickAdd(b.quick, b.quickAgent)
+				b.quick, b.quickAdding = "", false
 			}
 		})
 	})
@@ -484,6 +545,8 @@ func (b *board) cardView(c *ui.Context, p palette, task *Task) {
 				pill(c, "Question", p.amber)
 			case task.Status == Queued:
 				pill(c, "Queued", p.muted)
+			case task.picked && started(task):
+				pill(c, "Auto", p.sky)
 			case task.rev != nil:
 				pill(c, "AI review", p.sky)
 			case task.Status == Confirm:

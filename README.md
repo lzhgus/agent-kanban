@@ -35,6 +35,11 @@ your machine.
   agent's plan windows (Claude's 5-hour and weekly limits, Copilot's premium
   requests, and so on) with when they reset.
 - **Queue.** Choose how many agents run at once; the rest wait their turn.
+- **Auto pickup.** Double-click the To Do column to jot down a task for an
+  agent, or for **any** agent. Turn on **Auto** and free agents take To Do
+  tasks first come, first served, one at a time each; a task for any agent
+  goes to the free one with the most quota left. Tasks an agent filed
+  always plan first and wait for you to confirm.
 - **Sessions outside the board.** Claude Code and Codex sessions you run in a
   terminal show up on the board too, read-only, with their token usage.
 
@@ -73,7 +78,7 @@ To Do ─▶ Running ─▶ Review ─▶ Done
 To Do ─▶ Running (plan) ─▶ Confirm ─▶ Running ─▶ Review ─▶ Done    with Plan first
 ```
 
-- **To Do**: filed, not started.
+- **To Do**: filed, not started (or waiting for a free agent, with Auto on).
 - **Running**: an agent is working (or **Queued**, waiting for a free slot).
 - **Confirm**: a plan, or an agent's question, waits for you.
 - **Review**: the turn is done; reply, review, merge, or hand it off.

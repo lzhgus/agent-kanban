@@ -142,7 +142,7 @@ func TestBridgeProtocol(t *testing.T) {
 
 // An agent asks while planning: the task waits at Confirm with the
 // question, and an option clicked answers it. It files a task for another
-// agent, which starts.
+// agent, which starts, and plans first.
 func TestBridgeAgents(t *testing.T) {
 	var prompts []string
 	saved := drivers
@@ -196,7 +196,8 @@ func TestBridgeAgents(t *testing.T) {
 	}
 	sdk := b.Tasks[1]
 	drain(sdk)
-	if sdk.Agent != "copilot" || sdk.From != task.ID || sdk.Status != Review || !strings.Contains(strings.Join(task.Log, "\n"), "+ filed #2 for copilot") {
+	// What an agent files plans first, started or not: a person confirms it.
+	if sdk.Agent != "copilot" || sdk.From != task.ID || !sdk.ByAgent || !sdk.PlanFirst || sdk.Status != Confirm || !strings.Contains(strings.Join(task.Log, "\n"), "+ filed #2 for copilot") {
 		t.Errorf("the task filed: %+v", sdk)
 	}
 }
