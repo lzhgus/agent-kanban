@@ -27,9 +27,10 @@
 <meta name="twitter:title" content="Agent Kanban：一个看板管所有 coding agent">
 <meta name="twitter:description" content="开源桌面应用：把 Claude Code、GitHub Copilot CLI 和 Antigravity 当作看板上的任务来运行。每个任务一个 git 分支，先计划再动手，AI 互相审查，所有 agent 的 token 用量和额度一目了然。全部本地运行，无需 API key。">
 <meta name="twitter:image" content="https://agent-kanban.lzhgus.com/og-zh.png">
+<link rel="preconnect" href="https://api.github.com" crossorigin>
 <link rel="preload" as="image" href="/media/poster-zh.webp" fetchpriority="high">
 <link rel="stylesheet" href="/styles.css">
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Agent Kanban","applicationCategory":"DeveloperApplication","operatingSystem":"macOS","license":"https://opensource.org/licenses/MIT","url":"https://agent-kanban.lzhgus.com/zh/","codeRepository":"https://github.com/lzhgus/agent-kanban","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Agent Kanban","applicationCategory":"DeveloperApplication","operatingSystem":"macOS 12+","downloadUrl":"https://github.com/lzhgus/agent-kanban/releases/download/v0.1.0/agent-kanban-0.1.0.dmg","softwareVersion":"0.1.0","license":"https://opensource.org/licenses/MIT","url":"https://agent-kanban.lzhgus.com/zh/","codeRepository":"https://github.com/lzhgus/agent-kanban","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
 </head>
 <body class="lang-zh">
 <a class="skip" href="#main">跳到正文</a>
@@ -55,10 +56,10 @@
     <h1>一个看板管所有 <span class="hl">coding agent</span></h1>
     <p class="lede">Agent Kanban 把 Claude Code、GitHub Copilot CLI 和 Antigravity 当作看板上的任务来运行。每个任务在自己的 git 分支上工作；agent 会先做计划、互相审查、向你提问，每个 agent 的进度、token 用量和套餐额度都在一个地方看清楚。</p>
     <div class="ctas">
-      <a class="btn btn-primary" href="#start">开始使用</a>
-      <a class="btn btn-ghost" href="https://github.com/lzhgus/agent-kanban"><svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16"><path fill="currentColor" d="M8 .25a.75.75 0 01.67.42l1.88 3.81 4.2.61a.75.75 0 01.42 1.28l-3.04 2.96.72 4.19a.75.75 0 01-1.09.79L8 12.33l-3.76 1.98a.75.75 0 01-1.09-.79l.72-4.19L.83 6.37a.75.75 0 01.42-1.28l4.2-.61L7.33.67A.75.75 0 018 .25z"/></svg>在 GitHub 上 Star</a>
+      <a class="btn btn-primary btn-lg" href="https://github.com/lzhgus/agent-kanban/releases/download/v0.1.0/agent-kanban-0.1.0.dmg" data-dl><svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>下载 macOS 版</a>
+      <a class="btn btn-ghost btn-lg" href="https://github.com/lzhgus/agent-kanban"><svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16"><path fill="currentColor" d="M8 .25a.75.75 0 01.67.42l1.88 3.81 4.2.61a.75.75 0 01.42 1.28l-3.04 2.96.72 4.19a.75.75 0 01-1.09.79L8 12.33l-3.76 1.98a.75.75 0 01-1.09-.79l.72-4.19L.83 6.37a.75.75 0 01.42-1.28l4.2-.61L7.33.67A.75.75 0 018 .25z"/></svg>在 GitHub 上 Star</a>
     </div>
-    <div class="oneliner"><span class="prompt" aria-hidden="true">$</span><code>git clone https://github.com/lzhgus/agent-kanban.git &amp;&amp; cd agent-kanban &amp;&amp; go run .</code><button class="copy" type="button" data-copy="git clone https://github.com/lzhgus/agent-kanban.git &amp;&amp; cd agent-kanban &amp;&amp; go run ." data-done="已复制">复制</button></div>
+    <p class="dl-meta"><span data-dl-ver>v0.1.0</span> · 通用版 · macOS 12+ · 已签名并经 Apple 公证 <span class="nw">· <a href="#source">或从源码构建</a></span></p>
   </div>
   <div class="wrap wide">
     <figure class="stage">
@@ -116,6 +117,18 @@
   <div class="wrap">
     <p class="kicker">开始使用</p>
     <h2 id="start-h">一分钟跑起来。</h2>
+    <div class="install">
+      <div>
+        <h3>安装应用</h3>
+        <ol class="isteps"><li>下载 DMG：一个通用版应用，同时支持 Apple Silicon 和 Intel 芯片的 Mac，需要 macOS 12 或更新版本。</li><li>打开 DMG，把 <b>Agent Kanban</b> 拖进“应用程序”文件夹。</li><li>从“应用程序”、Dock 或 Spotlight 打开。应用已签名并经过 Apple 公证。</li></ol>
+        <p class="ireq">你仍然需要 git，以及至少一个上面列出的 agent CLI（已安装并登录）。不需要安装 Go。</p>
+      </div>
+      <div class="install-cta">
+        <a class="btn btn-primary btn-lg" href="https://github.com/lzhgus/agent-kanban/releases/download/v0.1.0/agent-kanban-0.1.0.dmg" data-dl><svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>下载 macOS 版</a>
+        <p class="dl-meta"><span data-dl-ver>v0.1.0</span> · 通用版 · macOS 12+ · 已签名并经 Apple 公证</p>
+      </div>
+    </div>
+    <h3 class="src-h" id="source">或者从源码构建</h3>
     <p class="sub">需要 macOS、<a href="https://go.dev/dl/">Go</a> 1.27.3 或更新版本、git，以及至少一个上面列出的 agent CLI（已安装并登录）。</p>
     <div class="starts">
       <div><div class="code"><div class="code-head"><span>从源码运行</span><button class="copy" type="button" data-copy="git clone https://github.com/lzhgus/agent-kanban.git
@@ -135,11 +148,13 @@ cp -R &quot;build/darwin-arm64/Agent Kanban.app&quot; /Applications/</code></pre
     <div class="cta">
       <img src="/logo-96.png" width="64" height="64" alt="" loading="lazy">
       <h2>免费、开源。</h2>
-      <p>MIT 协议。欢迎阅读代码、提 issue 或发 pull request。点个 Star 能帮更多人发现它。</p>
+      <p>MIT 协议。欢迎下载使用、阅读代码、提 issue 或发 pull request。点个 Star 能帮更多人发现它。</p>
       <div class="ctas">
-        <a class="btn btn-primary" href="https://github.com/lzhgus/agent-kanban"><svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16"><path fill="currentColor" d="M8 .25a.75.75 0 01.67.42l1.88 3.81 4.2.61a.75.75 0 01.42 1.28l-3.04 2.96.72 4.19a.75.75 0 01-1.09.79L8 12.33l-3.76 1.98a.75.75 0 01-1.09-.79l.72-4.19L.83 6.37a.75.75 0 01.42-1.28l4.2-.61L7.33.67A.75.75 0 018 .25z"/></svg>在 GitHub 上 Star</a>
+        <a class="btn btn-primary" href="https://github.com/lzhgus/agent-kanban/releases/download/v0.1.0/agent-kanban-0.1.0.dmg" data-dl><svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>下载 macOS 版</a>
+        <a class="btn btn-ghost" href="https://github.com/lzhgus/agent-kanban"><svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16"><path fill="currentColor" d="M8 .25a.75.75 0 01.67.42l1.88 3.81 4.2.61a.75.75 0 01.42 1.28l-3.04 2.96.72 4.19a.75.75 0 01-1.09.79L8 12.33l-3.76 1.98a.75.75 0 01-1.09-.79l.72-4.19L.83 6.37a.75.75 0 01.42-1.28l4.2-.61L7.33.67A.75.75 0 018 .25z"/></svg>在 GitHub 上 Star</a>
         <a class="btn btn-ghost" href="https://github.com/lzhgus/agent-kanban#readme">阅读 README</a>
       </div>
+      <p class="dl-meta"><span data-dl-ver>v0.1.0</span> · 通用版 · macOS 12+ · 已签名并经 Apple 公证</p>
     </div>
   </div>
 </section>
@@ -157,6 +172,7 @@ cp -R &quot;build/darwin-arm64/Agent Kanban.app&quot; /Applications/</code></pre
     </nav>
   </div>
 </footer>
+<script>(function(){var K='ak-latest',P='https://github.com/lzhgus/agent-kanban/releases/download/';function apply(d){if(!d||!d.u||d.u.indexOf(P)!==0)return;document.querySelectorAll('a[data-dl]').forEach(function(a){a.href=d.u});if(d.v)document.querySelectorAll('[data-dl-ver]').forEach(function(e){e.textContent=d.v})}try{var c=JSON.parse(sessionStorage.getItem(K));if(c){apply(c);return}}catch(e){}if(!window.fetch)return;fetch('https://api.github.com/repos/lzhgus/agent-kanban/releases/latest',{headers:{Accept:'application/vnd.github+json'}}).then(function(r){return r.ok?r.json():null}).then(function(j){if(!j||!j.assets)return;var a=j.assets.filter(function(x){return /\.dmg$/i.test(x.name)})[0];if(!a)return;var d={u:a.browser_download_url,v:String(j.tag_name||'').slice(0,24)};apply(d);try{sessionStorage.setItem(K,JSON.stringify(d))}catch(e){}}).catch(function(){})})();</script>
 <script src="/site.js" defer></script>
 </body>
 </html>

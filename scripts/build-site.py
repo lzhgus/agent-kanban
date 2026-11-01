@@ -10,6 +10,12 @@ from pathlib import Path
 SITE = Path(__file__).resolve().parent.parent / "site"
 URL = "https://agent-kanban.lzhgus.com"
 REPO = "https://github.com/lzhgus/agent-kanban"
+# Default download link: the DMG of the current release. The page asks the
+# GitHub API for the latest release when it loads and swaps in its DMG and
+# version, so this only matters if that call fails. Bump it on release.
+DMG_VERSION = "0.1.0"
+DMG_URL = f"{REPO}/releases/download/v{DMG_VERSION}/agent-kanban-{DMG_VERSION}.dmg"
+RELEASES_API = "https://api.github.com/repos/lzhgus/agent-kanban/releases/latest"
 
 ICONS = {
     "chat": '<path d="M4 5h16v11H9l-5 4z"/>',
@@ -77,12 +83,21 @@ STRINGS = {
             ("Your board stays yours", "The board and worktrees live in your Application Support folder. Deleting a task keeps its branch in your repository."),
         ],
         "priv_warn": "<b>Heads-up:</b> agents run headless with their permission prompts turned off, inside the task's worktree. Only point them at code you trust them with. Planning and review turns are read-only.",
+        "dl": "Download for macOS", "dl_meta": "Universal · macOS 12+ · signed &amp; notarized", "dl_src": "or build from source",
         "start_kicker": "Get started", "start_h": "Running in a minute.",
+        "start_dl_h": "Install the app",
+        "start_dl_steps": [
+            "Download the DMG: one universal app for Apple Silicon and Intel Macs, macOS 12 or newer.",
+            "Open it and drag <b>Agent Kanban</b> to Applications.",
+            "Open it from Applications, the Dock or Spotlight. It's signed and notarized by Apple.",
+        ],
+        "start_dl_req": "You still need git and at least one of the agent CLIs above, installed and signed in. No Go required.",
+        "start_src_h": "Or build from source",
         "start_req": 'You need macOS, <a href="https://go.dev/dl/">Go</a> 1.27.3 or newer, git, and at least one of the agent CLIs above, installed and signed in.',
         "start_run": "Run from source", "start_build": "Build the app",
         "start_run_after": "Click <b>New task</b>, describe what to do, pick an agent and a folder, and press <b>Add &amp; Run</b>. Tick <b>Plan first</b> to review a plan before the agent changes anything.",
         "start_build_after": "Keep it in Applications and open it from the Dock or Spotlight. The app and <code>go run .</code> share the same board. Linux should work but is untested; Windows isn't supported yet.",
-        "cta_h": "Free and open source.", "cta_p": "MIT licensed. Read the code, file an issue, or send a pull request. A star helps other people find it.",
+        "cta_h": "Free and open source.", "cta_p": "MIT licensed. Download the app, read the code, file an issue, or send a pull request. A star helps other people find it.",
         "cta_readme": "Read the README",
         "foot_license": "MIT License", "foot_built": 'Built with <a href="https://github.com/egoist/mygo">MyGo</a>, a native UI in pure Go.',
         "foot_demo": "Demo", "demo_path": "/demo/",
@@ -140,12 +155,21 @@ STRINGS = {
             ("看板数据只属于你", "看板和 worktree 保存在你的 Application Support 目录里。删除任务会保留它在仓库里的分支。"),
         ],
         "priv_warn": "<b>注意：</b>agent 以无头模式运行，并关闭了权限确认，工作范围在任务的 worktree 内。只让它们处理你信得过的代码。计划和审查轮次是只读的。",
+        "dl": "下载 macOS 版", "dl_meta": "通用版 · macOS 12+ · 已签名并经 Apple 公证", "dl_src": "或从源码构建",
         "start_kicker": "开始使用", "start_h": "一分钟跑起来。",
+        "start_dl_h": "安装应用",
+        "start_dl_steps": [
+            "下载 DMG：一个通用版应用，同时支持 Apple Silicon 和 Intel 芯片的 Mac，需要 macOS 12 或更新版本。",
+            "打开 DMG，把 <b>Agent Kanban</b> 拖进“应用程序”文件夹。",
+            "从“应用程序”、Dock 或 Spotlight 打开。应用已签名并经过 Apple 公证。",
+        ],
+        "start_dl_req": "你仍然需要 git，以及至少一个上面列出的 agent CLI（已安装并登录）。不需要安装 Go。",
+        "start_src_h": "或者从源码构建",
         "start_req": '需要 macOS、<a href="https://go.dev/dl/">Go</a> 1.27.3 或更新版本、git，以及至少一个上面列出的 agent CLI（已安装并登录）。',
         "start_run": "从源码运行", "start_build": "构建应用",
         "start_run_after": "点 <b>New task</b>，描述要做什么，选择 agent 和文件夹，然后点 <b>Add &amp; Run</b>。勾选 <b>Plan first</b> 可以在 agent 改动任何东西之前先审阅计划。",
         "start_build_after": "放进“应用程序”文件夹后，就能从 Dock 或 Spotlight 打开。应用和 <code>go run .</code> 共用同一个看板。Linux 应该可以运行但未经测试；暂不支持 Windows。",
-        "cta_h": "免费、开源。", "cta_p": "MIT 协议。欢迎阅读代码、提 issue 或发 pull request。点个 Star 能帮更多人发现它。",
+        "cta_h": "免费、开源。", "cta_p": "MIT 协议。欢迎下载使用、阅读代码、提 issue 或发 pull request。点个 Star 能帮更多人发现它。",
         "cta_readme": "阅读 README",
         "foot_license": "MIT 许可证", "foot_built": '基于 <a href="https://github.com/egoist/mygo">MyGo</a> 构建：纯 Go 绘制的原生界面。',
         "foot_demo": "演示", "demo_path": "/zh/demo/",
@@ -154,9 +178,9 @@ STRINGS = {
 
 RUN_CMD = "git clone https://github.com/lzhgus/agent-kanban.git\ncd agent-kanban\ngo run ."
 BUILD_CMD = 'go run github.com/egoist/mygo/cmd/mygo build -skip-dmg\ncp -R "build/darwin-arm64/Agent Kanban.app" /Applications/'
-ONE_LINER = "git clone https://github.com/lzhgus/agent-kanban.git && cd agent-kanban && go run ."
 
 GH_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>'
+DL_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>'
 STAR_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16"><path fill="currentColor" d="M8 .25a.75.75 0 01.67.42l1.88 3.81 4.2.61a.75.75 0 01.42 1.28l-3.04 2.96.72 4.19a.75.75 0 01-1.09.79L8 12.33l-3.76 1.98a.75.75 0 01-1.09-.79l.72-4.19L.83 6.37a.75.75 0 01.42-1.28l4.2-.61L7.33.67A.75.75 0 018 .25z"/></svg>'
 
 
@@ -170,6 +194,30 @@ def codeblock(cmd, t, label):
             f'<pre><code>{escape(cmd)}</code></pre></div>')
 
 
+def dl_button(t, extra=""):
+    return f'<a class="btn btn-primary{extra}" href="{DMG_URL}" data-dl>{DL_SVG}{t["dl"]}</a>'
+
+
+def dl_meta(t, src=True):
+    link = f' <span class="nw">· <a href="#source">{t["dl_src"]}</a></span>' if src else ""
+    return f'<p class="dl-meta"><span data-dl-ver>v{DMG_VERSION}</span> · {t["dl_meta"]}{link}</p>'
+
+
+# Swap in the latest release's DMG and version. Fails silently: the links
+# keep pointing at DMG_URL. Cached per tab session to spare the rate limit.
+DL_JS = ("<script>(function(){var K='ak-latest',P='" + REPO + "/releases/download/';"
+         "function apply(d){if(!d||!d.u||d.u.indexOf(P)!==0)return;"
+         "document.querySelectorAll('a[data-dl]').forEach(function(a){a.href=d.u});"
+         "if(d.v)document.querySelectorAll('[data-dl-ver]').forEach(function(e){e.textContent=d.v})}"
+         "try{var c=JSON.parse(sessionStorage.getItem(K));if(c){apply(c);return}}catch(e){}"
+         "if(!window.fetch)return;"
+         "fetch('" + RELEASES_API + "',{headers:{Accept:'application/vnd.github+json'}})"
+         ".then(function(r){return r.ok?r.json():null}).then(function(j){if(!j||!j.assets)return;"
+         "var a=j.assets.filter(function(x){return /\\.dmg$/i.test(x.name)})[0];if(!a)return;"
+         "var d={u:a.browser_download_url,v:String(j.tag_name||'').slice(0,24)};apply(d);"
+         "try{sessionStorage.setItem(K,JSON.stringify(d))}catch(e){}}).catch(function(){})})();</script>")
+
+
 def page(key):
     t = STRINGS[key]
     lang = "zh" if key == "zh" else "en"
@@ -180,6 +228,7 @@ def page(key):
     feats = "".join(f'<li class="feat">{icon(i)}<h3>{h}</h3><p>{p}</p></li>' for i, h, p in t["features"])
     flow = "".join(f'<li class="step {k}"><span class="sdot" aria-hidden="true"></span><h3>{h}</h3><p>{p}</p></li>' for k, h, p in t["flow"])
     priv = "".join(f'<li><h3>{h}</h3><p>{p}</p></li>' for h, p in t["privacy"])
+    steps = "".join(f'<li>{x}</li>' for x in t["start_dl_steps"])
     return f'''<!doctype html>
 <html lang="{t["lang"]}">
 <head>
@@ -209,9 +258,10 @@ def page(key):
 <meta name="twitter:title" content="{escape(t["title"])}">
 <meta name="twitter:description" content="{escape(t["desc"])}">
 <meta name="twitter:image" content="{URL}{t["og_image"]}">
+<link rel="preconnect" href="https://api.github.com" crossorigin>
 <link rel="preload" as="image" href="/media/poster-{lang}.webp" fetchpriority="high">
 <link rel="stylesheet" href="/styles.css">
-<script type="application/ld+json">{{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Agent Kanban","applicationCategory":"DeveloperApplication","operatingSystem":"macOS","license":"https://opensource.org/licenses/MIT","url":"{canonical}","codeRepository":"{REPO}","offers":{{"@type":"Offer","price":"0","priceCurrency":"USD"}}}}</script>
+<script type="application/ld+json">{{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Agent Kanban","applicationCategory":"DeveloperApplication","operatingSystem":"macOS 12+","downloadUrl":"{DMG_URL}","softwareVersion":"{DMG_VERSION}","license":"https://opensource.org/licenses/MIT","url":"{canonical}","codeRepository":"{REPO}","offers":{{"@type":"Offer","price":"0","priceCurrency":"USD"}}}}</script>
 </head>
 <body class="lang-{lang}">
 <a class="skip" href="#main">{t["skip"]}</a>
@@ -237,10 +287,10 @@ def page(key):
     <h1>{t["h1"]}</h1>
     <p class="lede">{t["lede"]}</p>
     <div class="ctas">
-      <a class="btn btn-primary" href="#start">{t["cta_primary"]}</a>
-      <a class="btn btn-ghost" href="{REPO}">{STAR_SVG}{t["star"]}</a>
+      {dl_button(t, " btn-lg")}
+      <a class="btn btn-ghost btn-lg" href="{REPO}">{STAR_SVG}{t["star"]}</a>
     </div>
-    <div class="oneliner"><span class="prompt" aria-hidden="true">$</span><code>{escape(ONE_LINER)}</code><button class="copy" type="button" data-copy="{escape(ONE_LINER)}" data-done="{t["copied"]}">{t["copy"]}</button></div>
+    {dl_meta(t)}
   </div>
   <div class="wrap wide">
     <figure class="stage">
@@ -298,6 +348,18 @@ def page(key):
   <div class="wrap">
     <p class="kicker">{t["start_kicker"]}</p>
     <h2 id="start-h">{t["start_h"]}</h2>
+    <div class="install">
+      <div>
+        <h3>{t["start_dl_h"]}</h3>
+        <ol class="isteps">{steps}</ol>
+        <p class="ireq">{t["start_dl_req"]}</p>
+      </div>
+      <div class="install-cta">
+        {dl_button(t, " btn-lg")}
+        {dl_meta(t, src=False)}
+      </div>
+    </div>
+    <h3 class="src-h" id="source">{t["start_src_h"]}</h3>
     <p class="sub">{t["start_req"]}</p>
     <div class="starts">
       <div>{codeblock(RUN_CMD, t, t["start_run"])}<p>{t["start_run_after"]}</p></div>
@@ -313,9 +375,11 @@ def page(key):
       <h2>{t["cta_h"]}</h2>
       <p>{t["cta_p"]}</p>
       <div class="ctas">
-        <a class="btn btn-primary" href="{REPO}">{STAR_SVG}{t["star"]}</a>
+        {dl_button(t)}
+        <a class="btn btn-ghost" href="{REPO}">{STAR_SVG}{t["star"]}</a>
         <a class="btn btn-ghost" href="{REPO}#readme">{t["cta_readme"]}</a>
       </div>
+      {dl_meta(t, src=False)}
     </div>
   </div>
 </section>
@@ -333,6 +397,7 @@ def page(key):
     </nav>
   </div>
 </footer>
+{DL_JS}
 <script src="/site.js" defer></script>
 </body>
 </html>
