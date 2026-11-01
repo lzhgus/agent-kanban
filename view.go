@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 )
 
 // palette holds the board's colors, light and dark.
@@ -100,12 +101,15 @@ var (
 	iconEye    = lucide(`<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>`)
 	iconFolder = lucide(`<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>`)
 	iconKanban = lucide(`<path d="M6 5v11"/><path d="M12 5v6"/><path d="M18 5v14"/>`)
+	iconMerge  = lucide(`<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/>`)
+	iconBranch = lucide(`<line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>`)
 )
 
 const (
 	titleBarHeight = 52
 	sidebarWidth   = 236
 	detailWidth    = 400
+	changesWidth   = 680 // the detail pane while it shows a diff
 	paneRadius     = 12
 	controlRadius  = 8 // every button and field: one radius
 	pulse          = 900 * time.Millisecond
@@ -248,11 +252,28 @@ func (b *board) boardPane(c *ui.Context, p palette) {
 		if b.composing {
 			b.composerView(c, p)
 		}
-		ui.Row(c).Grow(1).MinHeight(0).Gap(10).Padding(4, 12, 12, 12).AlignItems(ui.Stretch).Children(func() {
-			for _, s := range columns {
-				if tasks, sessions := b.items(s); s != Failed || len(tasks)+len(sessions) > 0 { // Failed only when something failed
-					b.columnView(c, p, s, tasks, sessions)
-				}
+		type col struct {
+			status   Status
+			tasks    []*Task
+			sessions []*Session
+		}
+		var cols []col
+		for _, s := range columns {
+			if tasks, sessions := b.items(s); s != Failed || len(tasks)+len(sessions) > 0 { // Failed only when something failed
+				cols = append(cols, col{s, tasks, sessions})
+			}
+		}
+		// The columns share the pane's width, down to a minimum; past it,
+		// as beside a diff, they scroll sideways.
+		w, _ := c.Size()
+		avail := w - sidebarWidth - 8 - 24 - float32(10*(len(cols)-1))
+		if b.selected != nil || b.selectedSession != "" {
+			avail -= b.detailWidth() + 8
+		}
+		width := max(150, avail/float32(len(cols)))
+		ui.ScrollHorizontal(c.Key("columns")).Grow(1).MinHeight(0).Gap(10).Padding(4, 12, 12, 12).AlignItems(ui.Stretch).Children(func() {
+			for _, k := range cols {
+				b.columnView(c, p, k.status, k.tasks, k.sessions, width)
 			}
 		})
 	})
@@ -303,8 +324,8 @@ func (b *board) items(s Status) (tasks []*Task, sessions []*Session) {
 	return tasks, sessions
 }
 
-func (b *board) columnView(c *ui.Context, p palette, s Status, tasks []*Task, sessions []*Session) {
-	col := ui.Column(c.Key(s)).Grow(1).MinWidth(150).Padding(10, 8, 8, 8).Gap(8).Radius(10).Background(p.column)
+func (b *board) columnView(c *ui.Context, p palette, s Status, tasks []*Task, sessions []*Session, width float32) {
+	col := ui.Column(c.Key(s)).Width(width).Shrink(0).Padding(10, 8, 8, 8).Gap(8).Radius(10).Background(p.column)
 	over := false
 	if task, ok := ui.DragOver[*Task](col); ok && task.Status != s {
 		over = true
@@ -394,7 +415,12 @@ func (b *board) cardView(c *ui.Context, p palette, task *Task) {
 		if total := task.Usage.Input + task.Usage.CacheRead + task.Usage.CacheWrite + task.Usage.Output; total > 0 {
 			meta += " · " + tokens(total) + " tok" + cost(task.Usage.CostUSD)
 		}
-		ui.Text(c, meta).FontSize(11).Font("monospace").TextColor(p.muted).MaxLines(1)
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, meta).FontSize(11).Font("monospace").TextColor(p.muted).MaxLines(1).Shrink(1).MinWidth(0)
+			if ch := task.Changes; ch.Files > 0 {
+				diffStat(c, p, ch.Added, ch.Deleted)
+			}
+		})
 		if task.Err != "" {
 			ui.Text(c, task.Err).FontSize(11).TextColor(p.red).Wrap().MaxLines(2)
 		}
@@ -428,8 +454,8 @@ func (b *board) sessionCardView(c *ui.Context, p palette, s *Session) {
 
 // ── detail ──────────────────────────────────────────────────────────────────
 
-func detailPane(c *ui.Context, p palette, key string, body func()) {
-	pane(ui.Column(c.Key(key)).Width(detailWidth).Shrink(0).Padding(0, 16, 16, 16).Gap(12), p).Children(body)
+func detailPane(c *ui.Context, p palette, key string, width float32, body func()) {
+	pane(ui.Column(c.Key(key)).Width(width).Shrink(0).Padding(0, 16, 16, 16).Gap(12), p).Children(body)
 }
 
 func detailHeader(c *ui.Context, p palette, agent, model string, s Status, label string, closeIt func()) {
@@ -508,7 +534,7 @@ func replyView(c *ui.Context, p palette, b *board, task *Task) {
 }
 
 func (b *board) detailView(c *ui.Context, p palette, task *Task) {
-	detailPane(c, p, fmt.Sprint("task-", task.ID), func() {
+	detailPane(c, p, fmt.Sprint("task-", task.ID), b.detailWidth(), func() {
 		detailHeader(c, p, task.Agent, task.Model, task.Status, string(task.Status), func() { b.selected = nil })
 		ui.Text(c, task.Title).FontSize(17).Bold().Wrap()
 		meta := fmt.Sprintf("#%d", task.ID)
@@ -517,6 +543,9 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 		}
 		ui.Text(c, meta).FontSize(11.5).TextColor(p.muted)
 		pathLine(c, p, task.Dir)
+		if ws := task.WS; ws != nil {
+			branchLine(c, p, task)
+		}
 		u := task.Usage
 		ui.Row(c).Gap(6).Children(func() {
 			stat(c, p, "IN", tokens(u.Input+u.CacheRead+u.CacheWrite))
@@ -542,8 +571,17 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 				if button(c, p, "run", "Run", iconPlay, primary).Clicked() {
 					b.start(task)
 				}
-			} else if button(c, p, "start-over", "Start over", iconPlay, secondary).Tooltip("Run the task again in a new conversation").Clicked() {
+			} else if button(c, p, "start-over", "Start over", iconPlay, secondary).Tooltip("Run the task again in a new conversation, on a new branch").Clicked() {
 				b.start(task)
+			}
+			if ws := task.WS; ws != nil && ws.Base != "" && !task.Merged && task.Changes.Files > 0 && (task.Status == Review || task.Status == Done) {
+				label := "Merge into " + ws.Base
+				if task.merging {
+					label = "Merging…"
+				}
+				if buttonIf(c, p, "merge", label, iconMerge, primary, task.merging).Tooltip("Merge " + ws.Branch + " into " + ws.Base + " in " + ws.Repo).Clicked() {
+					b.merge(task)
+				}
 			}
 			ui.Box(c).Grow(1)
 			if button(c, p, "delete", "Delete", iconTrash, danger).Clicked() {
@@ -560,7 +598,18 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 				}
 			})
 		}
-		logView(c, p, "log", append([]string{"› " + firstLine(task.Prompt)}, task.Log...))
+		if task.WS != nil {
+			changes := "Changes"
+			if n := task.Changes.Files; n > 0 {
+				changes = fmt.Sprintf("Changes · %d", n)
+			}
+			ui.Segmented(c.Key("detail-tab"), &b.detailTab, "Activity", changes).Label("Detail view")
+		}
+		if task.WS != nil && b.detailTab == 1 {
+			b.changesView(c, p, task)
+		} else {
+			logView(c, p, "log", append([]string{"› " + firstLine(task.Prompt)}, task.Log...))
+		}
 		if task.Status != Running && task.Status != Todo && task.SessionRef != "" {
 			replyView(c, p, b, task)
 		}
@@ -568,7 +617,7 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 }
 
 func (b *board) sessionDetailView(c *ui.Context, p palette, s *Session) {
-	detailPane(c, p, "session-"+s.key(), func() {
+	detailPane(c, p, "session-"+s.key(), detailWidth, func() {
 		st := b.sessionStatus(s)
 		label := map[Status]string{Running: "Working", Review: "Needs you", Done: "Done", Failed: "Failed"}[st]
 		detailHeader(c, p, s.Agent, s.Model, st, label, func() { b.selectedSession = "" })
@@ -709,4 +758,157 @@ func ago(t time.Time) string {
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+// detailWidth is the detail pane's: wider while it shows a task's diff.
+func (b *board) detailWidth() float32 {
+	if t := b.selected; t != nil && t.WS != nil && b.detailTab == 1 {
+		return changesWidth
+	}
+	return detailWidth
+}
+
+// ── changes ─────────────────────────────────────────────────────────────────
+
+// branchLine shows where the task's work is: its branch, what it forked
+// from, and how much it changed.
+func branchLine(c *ui.Context, p palette, t *Task) {
+	ws := t.WS
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Icon(c, iconBranch).Size(12, 12).TextColor(p.muted)
+		base := ws.Base
+		if base == "" {
+			base = ws.BaseSHA[:min(8, len(ws.BaseSHA))]
+		}
+		ui.Text(c, ws.Branch+" ← "+base).FontSize(11.5).Font("monospace").TextColor(p.muted).Selectable().MaxLines(1).Shrink(1).MinWidth(0)
+		if t.Changes.Files > 0 {
+			diffStat(c, p, t.Changes.Added, t.Changes.Deleted)
+		}
+		if t.Merged {
+			pill(c, "merged", p.brand)
+		}
+	}).Tooltip(ws.Worktree)
+}
+
+func diffStat(c *ui.Context, p palette, added, deleted int) {
+	ui.Row(c).Gap(4).Shrink(0).Children(func() {
+		ui.Text(c, fmt.Sprintf("+%d", added)).FontSize(11).Font("monospace").TextColor(p.brand)
+		ui.Text(c, fmt.Sprintf("−%d", deleted)).FontSize(11).Font("monospace").TextColor(p.red)
+	})
+}
+
+// diffPane is the changes tab: the branch's files against its base, and the
+// diff of the one chosen. It loads off the main thread, again after a turn.
+type diffPane struct {
+	task    *Task
+	turns   int // the task's turns when it loaded
+	loading bool
+	files   []fileChange
+	err     string
+	path    string
+	state   *editor.DiffState
+	note    string // why the chosen file shows no diff
+}
+
+func (b *board) loadChanges(t *Task) {
+	ws := *t.WS
+	d := &diffPane{task: t, turns: t.Runs, loading: true}
+	b.diff = d
+	go func() {
+		files, err := ws.files()
+		b.update(func() {
+			if b.diff != d {
+				return
+			}
+			d.loading, d.files = false, files
+			if err != nil {
+				d.err = err.Error()
+			}
+			if len(files) > 0 {
+				b.openFile(d, files[0].Path)
+			}
+		})
+	}()
+}
+
+func (b *board) openFile(d *diffPane, path string) {
+	ws := *d.task.WS
+	d.path, d.state, d.note = path, nil, ""
+	go func() {
+		before, after, err := ws.texts(path)
+		b.update(func() {
+			if b.diff != d || d.path != path {
+				return
+			}
+			switch {
+			case err != nil:
+				d.note = err.Error()
+			case strings.ContainsRune(before, 0) || strings.ContainsRune(after, 0):
+				d.note = "Binary file"
+			default:
+				lang := editor.LanguageFor(path)
+				o, n := editor.NewBuffer(before), editor.NewBuffer(after)
+				o.SetLanguage(lang)
+				n.SetLanguage(lang)
+				d.state = &editor.DiffState{Old: o, New: n, Layout: editor.DiffUnified}
+			}
+		})
+	}()
+}
+
+func (b *board) changesView(c *ui.Context, p palette, t *Task) {
+	if t.Status != Running && (b.diff == nil || b.diff.task != t || b.diff.turns != t.Runs) {
+		b.loadChanges(t)
+	}
+	d := b.diff
+	box := ui.Column(c.Key("changes")).Grow(1).MinHeight(0).Gap(8)
+	box.Children(func() {
+		switch {
+		case t.Status == Running && (d == nil || d.task != t):
+			ui.Text(c, "The changes show when the turn ends.").FontSize(12).TextColor(p.muted)
+			return
+		case d == nil || d.task != t || d.loading:
+			ui.Spinner(c)
+			return
+		case d.err != "":
+			ui.Text(c, d.err).FontSize(12).TextColor(p.red).Wrap()
+			return
+		case len(d.files) == 0:
+			ui.Text(c, "No changes on "+t.WS.Branch+" yet.").FontSize(12).TextColor(p.muted)
+			return
+		}
+		ui.Scroll(c.Key("files")).MaxHeight(150).Gap(2).Padding(4).Radius(controlRadius).Background(p.column).Children(func() {
+			for _, f := range d.files {
+				row := ui.ButtonBase(c.Key("file-"+f.Path)).Label(f.Path).FillWidth().Padding(5, 8).Radius(6).Row().Gap(8).AlignItems(ui.Center)
+				switch {
+				case f.Path == d.path:
+					row.Background(p.pane)
+				case row.Hovered():
+					row.Background(p.ink.Alpha(0.05))
+				}
+				if row.Clicked() && f.Path != d.path {
+					b.openFile(d, f.Path)
+				}
+				row.Children(func() {
+					ui.Text(c, f.Path).FontSize(12).Font("monospace").MaxLines(1).Grow(1).Shrink(1).MinWidth(0)
+					if f.Added < 0 {
+						ui.Text(c, "binary").FontSize(11).TextColor(p.muted)
+					} else {
+						diffStat(c, p, f.Added, f.Deleted)
+					}
+				})
+			}
+		})
+		frame := ui.Column(c.Key("diff")).Grow(1).MinHeight(0).Radius(controlRadius).Clip().Background(p.pane).InsetShadow(0, 0, 0, 1, p.stroke)
+		frame.Children(func() {
+			switch {
+			case d.note != "":
+				ui.Text(c, d.note).FontSize(12).TextColor(p.muted).Padding(12)
+			case d.state == nil:
+				ui.Spinner(c).Margin(12)
+			default:
+				editor.DiffView(c.Key("diff-"+d.path), d.state).Grow(1).FillWidth()
+			}
+		})
+	})
 }

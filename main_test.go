@@ -129,14 +129,16 @@ func TestStop(t *testing.T) {
 		return result{SessionRef: task.SessionRef}, errors.New("signal: killed")
 	}}
 	defer func() { drivers = saved }()
-	queue := make(chan func(), 4)
+	queue := make(chan func(), 16)
 	b := newBoard("")
 	b.update = func(f func()) { queue <- f }
 	b.dir, b.prompt = t.TempDir(), "loop forever"
 	b.add(true)
 	task := b.Tasks[0]
 	b.stop(task)
-	(<-queue)()
+	for task.Status == Running {
+		(<-queue)()
+	}
 	if task.Status != Todo || task.Err != "" || len(b.runs) != 0 {
 		t.Errorf("after stopping the first turn: status %q, err %q, runs %d", task.Status, task.Err, len(b.runs))
 	}
@@ -144,7 +146,9 @@ func TestStop(t *testing.T) {
 	session := task.SessionRef
 	b.reply(task, "and more")
 	b.stop(task)
-	(<-queue)()
+	for task.Status == Running {
+		(<-queue)()
+	}
 	if task.Status != Review || task.SessionRef != session || session == "" {
 		t.Errorf("after stopping a reply: status %q, session %q (was %q)", task.Status, task.SessionRef, session)
 	}

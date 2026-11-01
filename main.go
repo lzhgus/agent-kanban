@@ -57,9 +57,15 @@ type Task struct {
 	SessionRef string
 	// Claude Code sessions of the task, which the watcher leaves to it.
 	SessionIDs []string
+	// The task's worktree and branch; nil when its folder is not in git and
+	// the agent works there in place.
+	WS      *Workspace
+	Changes Changes // its branch against its base, after the last turn
+	Merged  bool
 
-	resume bool   // this turn continues SessionRef (the drivers' copy only)
-	draft  string // the reply being written in the detail panel
+	resume  bool   // this turn continues SessionRef (the drivers' copy only)
+	draft   string // the reply being written in the detail panel
+	merging bool
 }
 
 // newUUID returns a random version 4 UUID.
@@ -89,7 +95,10 @@ type board struct {
 	Placed map[string]placement
 
 	path            string
+	worktrees       string // where tasks' worktrees go
 	selected        *Task
+	detailTab       int        // 0 activity, 1 changes
+	diff            *diffPane  // the changes tab's files and diff
 	sessions        []*Session // from the watcher, replaced on each scan
 	selectedSession string     // its key
 	filter          string     // the agent the board shows; "" for all
@@ -103,7 +112,11 @@ type board struct {
 }
 
 func newBoard(path string) *board {
-	b := &board{path: path, runs: map[int]context.CancelFunc{}, agent: agentNames[0], handoffTo: agentNames[1]}
+	b := &board{path: path, runs: map[int]context.CancelFunc{}, agent: agentNames[0], handoffTo: agentNames[1],
+		worktrees: filepath.Join(filepath.Dir(path), "worktrees")}
+	if path == "" {
+		b.worktrees = filepath.Join(os.TempDir(), "agent-kanban-worktrees")
+	}
 	if data, err := os.ReadFile(path); err == nil {
 		if err := json.Unmarshal(data, b); err != nil {
 			log.Printf("reading %s: %v", path, err)
@@ -207,7 +220,19 @@ func (b *board) turn(t *Task, prompt string, resume bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	b.runs[t.ID] = cancel
 	before := t.Status
-	t.Status, t.Err = Running, ""
+	var drop *Workspace // a start over forks a new branch; the old one stays
+	if !resume && t.Runs > 0 && t.WS != nil {
+		if !b.shared(t) {
+			drop = t.WS
+		}
+		t.WS, t.Changes, t.Merged = nil, Changes{}, false
+	}
+	var ws *Workspace
+	if t.WS != nil {
+		w := *t.WS
+		ws = &w
+	}
+	t.Status, t.Err, t.Merged = Running, "", false // new work is not merged yet
 	t.Runs++
 	if !resume { // a new conversation
 		t.SessionRef = ""
@@ -232,12 +257,107 @@ func (b *board) turn(t *Task, prompt string, resume bool) {
 	task.Prompt, task.resume = prompt, resume
 	b.procs.Add(1)
 	go func() {
-		r, err := drive(ctx, task, func(line string) { b.update(func() { t.addLog(line) }) })
+		defer b.procs.Done()
+		log := func(line string) { b.update(func() { t.addLog(line) }) }
+		if drop != nil {
+			drop.remove()
+		}
+		ws, err := b.workspace(ws, task, log)
+		if err != nil {
+			b.update(func() { b.finish(t, result{}, err, time.Since(began), before, resume, turnGit{}) })
+			return
+		}
+		if ws != nil {
+			task.Dir = ws.Dir()
+		}
+		r, err := drive(ctx, task, log)
 		if ctx.Err() != nil {
 			err = ctx.Err() // a stopped agent reports its kill ("signal: killed"), not why
 		}
-		b.procs.Done()
-		b.update(func() { b.finish(t, r, err, time.Since(began), before, resume) })
+		var g turnGit
+		if ws != nil { // every turn ends in a commit, stopped and failed ones too
+			g.changes, g.err = ws.checkpoint(task.Agent, commitMessage(task, task.Runs))
+			g.ok = true
+		}
+		b.update(func() { b.finish(t, r, err, time.Since(began), before, resume, g) })
+	}()
+}
+
+// workspace readies the turn's worktree: the task's own, brought back if it
+// was deleted, or a new one for its first turn. It runs off the main thread.
+func (b *board) workspace(ws *Workspace, task Task, log emit) (*Workspace, error) {
+	if ws != nil {
+		return ws, ws.ensure()
+	}
+	ws, note, err := openWorkspace(task.Dir, b.worktrees, task.ID, task.Title)
+	if note != "" {
+		log("note: " + note)
+	}
+	if err != nil || ws == nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(ws.Dir(), 0o755); err != nil { // an untracked folder is not checked out
+		return nil, err
+	}
+	log("── branch " + ws.Branch + " in " + ws.Worktree)
+	w := *ws
+	b.update(func() {
+		for _, t := range b.Tasks {
+			if t.ID == task.ID {
+				t.WS = &w
+			}
+		}
+	})
+	return ws, nil
+}
+
+// turnGit is what a turn's checkpoint found.
+type turnGit struct {
+	ok      bool
+	changes Changes
+	err     error
+}
+
+func commitMessage(t Task, turn int) string {
+	subject := firstLine(t.Prompt)
+	if len(subject) > 64 {
+		subject = strings.TrimSpace(subject[:64]) + "…"
+	}
+	return fmt.Sprintf("%s: %s\n\nTurn %d of task #%d (%s).", t.Agent, subject, turn, t.ID, t.Title)
+}
+
+// shared reports whether another task works in t's worktree, as a hand-off
+// does in the one it came from.
+func (b *board) shared(t *Task) bool {
+	for _, o := range b.Tasks {
+		if o != t && o.WS != nil && t.WS != nil && o.WS.Worktree == t.WS.Worktree {
+			return true
+		}
+	}
+	return false
+}
+
+// merge merges the task's branch into its base in your checkout, and marks
+// the task done.
+func (b *board) merge(t *Task) {
+	if t.WS == nil || t.merging || t.Status == Running {
+		return
+	}
+	t.merging = true
+	ws, title := *t.WS, t.Title
+	go func() {
+		err := ws.merge(title)
+		b.update(func() {
+			t.merging = false
+			if err != nil {
+				t.Err = "merge: " + err.Error()
+				t.addLog("✗ " + t.Err)
+			} else {
+				t.Status, t.Err, t.Merged = Done, "", true
+				t.addLog("── merged " + ws.Branch + " into " + ws.Base)
+			}
+			b.save()
+		})
 	}()
 }
 
@@ -250,11 +370,18 @@ func modelSuffix(m string) string {
 
 // finish records a turn's outcome. A stopped turn rests where the task was
 // before it: To Do for a first turn, else Review, the conversation kept.
-func (b *board) finish(t *Task, r result, err error, took time.Duration, before Status, resumed bool) {
+func (b *board) finish(t *Task, r result, err error, took time.Duration, before Status, resumed bool, g turnGit) {
 	stopped := errors.Is(err, context.Canceled)
 	if cancel := b.runs[t.ID]; cancel != nil {
 		cancel()
 		delete(b.runs, t.ID)
+	}
+	if g.ok {
+		if g.err != nil {
+			t.addLog("✗ commit: " + g.err.Error())
+		} else {
+			t.Changes = g.changes
+		}
 	}
 	t.Usage.add(r.Usage)
 	t.Duration += took
@@ -323,8 +450,12 @@ func (b *board) handoff(from *Task, agent string) {
 		Status: Todo,
 		From:   from.ID,
 		Prompt: fmt.Sprintf("%s\n\n---\nAnother coding agent (%s) already worked on this task in this directory. Its report:\n\n%s\n\n"+
-			"Review its work: inspect the changes in the working directory, fix anything wrong, finish anything left undone, and report what you changed.",
-			from.Prompt, from.Agent, report),
+			"Review its work: inspect the changes%s, fix anything wrong, finish anything left undone, and report what you changed.",
+			from.Prompt, from.Agent, report, changesHint(from.WS)),
+	}
+	if from.WS != nil { // the same branch: the reviewer works on what it reviews
+		ws := *from.WS
+		t.WS, t.Changes = &ws, from.Changes
 	}
 	b.Tasks = append(b.Tasks, t)
 	b.selected = t
@@ -394,8 +525,20 @@ func (b *board) findSession(key string) *Session {
 	return nil
 }
 
+func changesHint(ws *Workspace) string {
+	if ws == nil {
+		return " in the working directory"
+	}
+	return fmt.Sprintf(" on this branch (%s, forked from %s: `git diff %s` shows them)", ws.Branch, ws.BaseSHA[:min(12, len(ws.BaseSHA))], ws.BaseSHA)
+}
+
+// remove deletes a task and its worktree; its branch, and the work on it,
+// stay in your repository.
 func (b *board) remove(t *Task) {
 	b.stop(t)
+	if t.WS != nil && !b.shared(t) {
+		go t.WS.remove() // ponytail: a stopping turn may still commit there; git refuses then, and the worktree stays
+	}
 	b.Tasks = slices.DeleteFunc(b.Tasks, func(v *Task) bool { return v == t })
 	if b.selected == t {
 		b.selected = nil
