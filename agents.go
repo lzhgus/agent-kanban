@@ -135,6 +135,10 @@ func claudeArgs(t Task) []string {
 	if t.Model != "" {
 		args = append(args, "--model", t.Model)
 	}
+	if t.mcpURL != "" { // next to the user's own servers, which still load
+		cfg, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{bridgeName: map[string]any{"type": "http", "url": t.mcpURL}}})
+		args = append(args, "--mcp-config="+string(cfg))
+	}
 	if t.readOnly { // Bash can still write: what it leaves is undone after the turn
 		args = append(args, "--disallowedTools=Write,Edit,NotebookEdit")
 	}
@@ -414,6 +418,9 @@ func runCopilot(ctx context.Context, t Task, log emit) (result, error) {
 	opts := map[string]any{"workingDirectory": t.Dir, "streaming": true, "requestPermission": true}
 	if t.Model != "" {
 		opts["model"] = t.Model
+	}
+	if t.mcpURL != "" {
+		opts["mcpServers"] = map[string]any{bridgeName: map[string]any{"type": "http", "url": t.mcpURL, "headers": map[string]string{}}}
 	}
 	id := ""
 	if t.resume && t.SessionRef != "" {

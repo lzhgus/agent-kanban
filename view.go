@@ -439,6 +439,8 @@ func (b *board) cardView(c *ui.Context, p palette, task *Task) {
 			agentLabel(c, p, task.Agent, task.Status == Running)
 			ui.Box(c).Grow(1)
 			switch {
+			case task.Question != nil && !started(task):
+				pill(c, "Question", p.amber)
 			case task.Status == Queued:
 				pill(c, "Queued", p.muted)
 			case task.rev != nil:
@@ -575,6 +577,8 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 	detailPane(c, p, fmt.Sprint("task-", task.ID), b.detailWidth(), func() {
 		label := string(task.Status)
 		switch {
+		case task.Question != nil && !started(task):
+			label = "Question"
 		case task.Status == Confirm:
 			label = "Plan ready"
 		case task.Status == Running && task.rev != nil && strings.HasPrefix(task.doing, "review"):
@@ -590,7 +594,7 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 		ui.Text(c, task.Title).FontSize(17).Bold().Wrap()
 		meta := fmt.Sprintf("#%d", task.ID)
 		if task.From != 0 {
-			meta += fmt.Sprintf(" · handed off from #%d", task.From)
+			meta += fmt.Sprintf(" · from #%d", task.From)
 		}
 		ui.Text(c, meta).FontSize(11.5).TextColor(p.muted)
 		pathLine(c, p, task.Dir)
@@ -624,7 +628,7 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 				}
 				return
 			}
-			if task.Status == Confirm {
+			if task.Status == Confirm && len(task.Plans) > 0 {
 				if button(c, p, "confirm", "Confirm plan", iconPlay, primary).Tooltip("Build it: the agent implements the plan in the same conversation").Clicked() {
 					b.confirm(task)
 				}
@@ -670,6 +674,9 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 			logView(c, p, "log", append([]string{"› " + firstLine(task.Prompt)}, task.Log...))
 		}
 		if !started(task) && task.Status != Todo && task.SessionRef != "" {
+			if task.Question != nil {
+				questionCard(c, p, b, task)
+			}
 			replyView(c, p, b, task)
 		}
 	})
@@ -857,7 +864,28 @@ func (b *board) currentTab(t *Task) string {
 	return "Activity"
 }
 
+// questionCard shows what the agent asked: an option is a reply.
+func questionCard(c *ui.Context, p palette, b *board, t *Task) {
+	q := t.Question
+	ui.Column(c.Key("question")).Gap(8).Padding(12).Radius(10).Background(p.amber.Alpha(0.1)).InsetShadow(0, 0, 0, 1, p.amber.Alpha(0.35)).Children(func() {
+		ui.Text(c, t.Agent+" asks").FontSize(10.5).Bold().LetterSpacing(0.6).TextColor(p.amber)
+		ui.Text(c, q.Text).FontSize(13).Wrap().Selectable()
+		if len(q.Options) > 0 {
+			ui.Row(c).Gap(6).Wrap().Children(func() {
+				for i, opt := range q.Options {
+					if button(c, p, fmt.Sprint("option-", i), opt, nil, secondary).Clicked() {
+						b.reply(t, opt)
+					}
+				}
+			})
+		}
+	})
+}
+
 func replyHint(t *Task) string {
+	if t.Question != nil {
+		return "Answer " + t.Agent + "'s question"
+	}
 	if t.Status == Confirm {
 		return "Reply to revise the plan, or confirm it to build"
 	}

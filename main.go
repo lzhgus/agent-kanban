@@ -14,6 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -74,6 +76,8 @@ type Task struct {
 	Others map[string]Usage
 	// Where a queued task was before its turn queued, to go back to.
 	QueuedFrom Status
+	// The question its agent asked you (ask_user), until you answer.
+	Question *Question
 
 	resume   bool   // this turn continues SessionRef (the drivers' copy only)
 	readOnly bool   // this turn may read but not write (the drivers' copy only)
@@ -81,7 +85,15 @@ type Task struct {
 	merging  bool
 	rev      *reviewLoop // the AI review going on, if one is
 	pending  *queuedTurn // the turn waiting in the queue
+	mcpURL   string      // the board's MCP server for this turn (the drivers' copy only)
 	doing    string      // the running turn's kind, for its label
+}
+
+// Question is what an agent asked you: an answer is your next reply.
+type Question struct {
+	Text    string
+	Options []string
+	Turn    int // the turn that asked it
 }
 
 // newUUID returns a random version 4 UUID.
@@ -129,6 +141,7 @@ type board struct {
 	tab             string // the detail pane's tab chosen; "" until one is
 	md              markdown.Options
 	diff            *diffPane  // the changes tab's files and diff
+	bridge          *bridge    // the MCP server agents reach the board through; nil without one
 	sessions        []*Session // from the watcher, replaced on each scan
 	selectedSession string     // its key
 	filter          string     // the agent the board shows; "" for all
@@ -388,6 +401,7 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 	t.Status, t.Err = Running, ""
 	if o.reviewer == "" {
 		t.Merged = false // new work is not merged yet
+		t.Question = nil // a turn of its agent answers it, or moves past it
 	}
 	t.Runs++
 	if !o.resume && o.reviewer == "" { // a new conversation
@@ -430,9 +444,14 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 		}
 	}
 	b.save()
+	closeBridge := func() {}
+	if b.bridge != nil {
+		task.mcpURL, closeBridge = b.bridge.open(t, o.reviewer != "")
+	}
 	b.procs.Add(1)
 	go func() {
 		defer b.procs.Done()
+		defer closeBridge()
 		log := func(line string) { b.update(func() { t.addLog(line) }) }
 		if drop != nil {
 			drop.remove()
@@ -607,6 +626,8 @@ func (b *board) finish(t *Task, r result, err error, took time.Duration, before 
 		t.Status, t.Err = Failed, err.Error()
 	case r.Err != "":
 		t.Status, t.Err = Failed, r.Err
+	case o.plan && t.Question != nil && t.Question.Turn == t.Runs: // it asked before planning on
+		t.Status = Confirm
 	case o.plan && strings.TrimSpace(r.Text) == "":
 		t.Status, t.Err = Failed, "the agent wrote no plan"
 	case o.plan:
@@ -767,6 +788,14 @@ func main() {
 		log.Fatal(err)
 	}
 	b := newBoard(filepath.Join(dir, "agent-kanban", "board.json"))
+	if ln, err := net.Listen("tcp", "127.0.0.1:0"); err != nil {
+		log.Printf("the agents' MCP server: %v; they run without it", err)
+	} else {
+		br := newBridge(b)
+		br.base = "http://" + ln.Addr().String() + "/mcp/"
+		go http.Serve(ln, br)
+		b.bridge = br
+	}
 	mygo.App.WhenReady(func() {
 		win := mygo.NewWindow(mygo.WindowOptions{
 			Title: "Agent Kanban", Width: 1440, Height: 880, MinWidth: 1000, MinHeight: 560,
