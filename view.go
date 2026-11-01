@@ -170,11 +170,24 @@ func (b *board) sidebarView(c *ui.Context, p palette) {
 			b.agentRow(c, p, name, name)
 		}
 		ui.Box(c).Grow(1)
+		b.limitRow(c, p)
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(6).Children(func() {
 			statusDot(c, p.brand, true)
 			ui.Text(c, "Watching Claude Code & Codex").FontSize(11).TextColor(p.muted)
 		})
 		ui.Text(c, "Outside sessions idle 2 h move to Done.").FontSize(11).TextColor(p.muted).Wrap().Padding(0, 6)
+	})
+}
+
+// limitRow sets how many agents run at once; more wait in the queue.
+func (b *board) limitRow(c *ui.Context, p palette) {
+	n := float64(b.maxRunning())
+	ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(6).Children(func() {
+		ui.Text(c, "Agents at once").FontSize(12).TextColor(p.muted).Grow(1)
+		ui.Textf(c, "%.0f", n).FontSize(13).FontWeight(600).FontFeatures("tnum")
+		if ui.Stepper(c.Key("max-running"), &n, 1, 10, 1).Label("Agents at once").Changed() {
+			b.setMaxRunning(int(n))
+		}
 	})
 }
 
@@ -231,11 +244,15 @@ func (b *board) visible(agent string) bool { return b.filter == "" || b.filter =
 
 func (b *board) boardPane(c *ui.Context, p palette) {
 	pane(ui.Column(c).Grow(1).MinWidth(0), p).Children(func() {
-		running, waiting := 0, 0
+		running, queued, waiting := 0, 0, 0
 		for _, t := range b.Tasks {
-			if b.visible(t.Agent) && t.Status == Running {
+			switch {
+			case !b.visible(t.Agent):
+			case t.Status == Running:
 				running++
-			} else if b.visible(t.Agent) && (t.Status == Review || t.Status == Confirm) {
+			case t.Status == Queued:
+				queued++
+			case t.Status == Review || t.Status == Confirm:
 				waiting++
 			}
 		}
@@ -254,7 +271,11 @@ func (b *board) boardPane(c *ui.Context, p palette) {
 		}
 		ui.Row(c).Height(titleBarHeight).Shrink(0).Padding(0, 16).Gap(10).AlignItems(ui.Center).DragWindow().Children(func() {
 			ui.Text(c, title).FontSize(15).Bold()
-			ui.Text(c, fmt.Sprintf("%d running · %d need you", running, waiting)).FontSize(12).TextColor(p.muted)
+			summary := fmt.Sprintf("%d running", running)
+			if queued > 0 {
+				summary += fmt.Sprintf(" · %d queued", queued)
+			}
+			ui.Text(c, summary+fmt.Sprintf(" · %d need you", waiting)).FontSize(12).TextColor(p.muted)
 		})
 		if b.composing {
 			b.composerView(c, p)
@@ -320,7 +341,8 @@ func (b *board) composerView(c *ui.Context, p palette) {
 // items returns what a column shows, under the agent filter.
 func (b *board) items(s Status) (tasks []*Task, sessions []*Session) {
 	for _, t := range b.Tasks {
-		if (t.Status == s || s == Review && t.Status == Confirm) && b.visible(t.Agent) { // a plan waits with the work that does
+		// A plan waits with the work that does; a queued turn with the running.
+		if (t.Status == s || s == Review && t.Status == Confirm || s == Running && t.Status == Queued) && b.visible(t.Agent) {
 			tasks = append(tasks, t)
 		}
 	}
@@ -406,7 +428,7 @@ func agentLabel(c *ui.Context, p palette, name string, running bool) {
 
 func (b *board) cardView(c *ui.Context, p palette, task *Task) {
 	e := card(ui.Column(c.Key(task)).Label(task.Title), p, b.selected == task)
-	if task.Status != Running {
+	if !started(task) {
 		e.Drag(task)
 	}
 	if e.Clicked() {
@@ -417,6 +439,8 @@ func (b *board) cardView(c *ui.Context, p palette, task *Task) {
 			agentLabel(c, p, task.Agent, task.Status == Running)
 			ui.Box(c).Grow(1)
 			switch {
+			case task.Status == Queued:
+				pill(c, "Queued", p.muted)
 			case task.rev != nil:
 				pill(c, "AI review", p.sky)
 			case task.Status == Confirm:
@@ -559,6 +583,8 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 			label = "Revising"
 		case task.Status == Running && task.doing == "plan":
 			label = "Planning"
+		case task.Status == Queued:
+			label = fmt.Sprintf("Queued · %d of %d", slices.Index(b.queue, task)+1, len(b.queue))
 		}
 		detailHeader(c, p, task.Agent, task.Model, task.Status, label, func() { b.selected = nil })
 		ui.Text(c, task.Title).FontSize(17).Bold().Wrap()
@@ -586,8 +612,14 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 			ui.Text(c, task.Err).FontSize(12).TextColor(p.red).Wrap().Padding(8, 10).Radius(controlRadius).Background(p.red.Alpha(0.1))
 		}
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-			if task.Status == Running {
+			switch task.Status {
+			case Running:
 				if button(c, p, "stop", "Stop", iconStop, secondary).Clicked() {
+					b.stop(task)
+				}
+				return
+			case Queued:
+				if button(c, p, "unqueue", "Cancel", iconX, secondary).Tooltip("Take it off the queue").Clicked() {
 					b.stop(task)
 				}
 				return
@@ -637,7 +669,7 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 		default:
 			logView(c, p, "log", append([]string{"› " + firstLine(task.Prompt)}, task.Log...))
 		}
-		if task.Status != Running && task.Status != Todo && task.SessionRef != "" {
+		if !started(task) && task.Status != Todo && task.SessionRef != "" {
 			replyView(c, p, b, task)
 		}
 	})

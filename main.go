@@ -31,6 +31,7 @@ type Status string
 const (
 	Todo    Status = "To Do"
 	Running Status = "Running"
+	Queued  Status = "Queued"  // waits for a free slot; shown in the Running column
 	Confirm Status = "Confirm" // a plan waits for you; shown in the Review column
 	Review  Status = "Review"
 	Done    Status = "Done"
@@ -71,12 +72,15 @@ type Task struct {
 	Stage     string   // "plan" or "build": what its last turn did
 	// What other agents spent on it, reviewing: by agent.
 	Others map[string]Usage
+	// Where a queued task was before its turn queued, to go back to.
+	QueuedFrom Status
 
 	resume   bool   // this turn continues SessionRef (the drivers' copy only)
 	readOnly bool   // this turn may read but not write (the drivers' copy only)
 	draft    string // the reply being written in the detail panel
 	merging  bool
 	rev      *reviewLoop // the AI review going on, if one is
+	pending  *queuedTurn // the turn waiting in the queue
 	doing    string      // the running turn's kind, for its label
 }
 
@@ -116,6 +120,8 @@ type board struct {
 	Placed map[string]placement
 	// The new-task form's Plan first, kept for the next task.
 	PlanFirst bool
+	// MaxRunning is how many turns run at once; more wait in the queue.
+	MaxRunning int
 
 	path            string
 	worktrees       string // where tasks' worktrees go
@@ -128,6 +134,7 @@ type board struct {
 	filter          string     // the agent the board shows; "" for all
 	composing       bool       // the new-task composer is open
 	runs            map[int]context.CancelFunc
+	queue           []*Task        // tasks whose turn waits for a slot, first come first
 	procs           sync.WaitGroup // drivers still running, for quitting
 	update          func(func())   // runs a function on the main thread: Window.Update
 
@@ -152,8 +159,12 @@ func newBoard(path string) *board {
 		b.Placed = map[string]placement{}
 	}
 	for _, t := range b.Tasks {
-		if t.Status == Running { // the app quit under it
+		switch t.Status {
+		case Running: // the app quit under it
 			t.Status, t.Err = Failed, "interrupted: the app quit while it ran"
+		case Queued: // the turn waiting is gone with the app
+			t.Status = t.QueuedFrom
+			t.addLog("── the queued turn was dropped: the app quit")
 		}
 	}
 	b.dir = b.LastDir
@@ -282,9 +293,56 @@ func (b *board) confirm(t *Task) {
 	b.turn(t, prompt, turnOpts{resume: true, said: note})
 }
 
-// turn runs one turn of the task's agent on a goroutine of its own.
+const defaultMaxRunning = 3
+
+func (b *board) maxRunning() int {
+	if b.MaxRunning < 1 {
+		return defaultMaxRunning
+	}
+	return b.MaxRunning
+}
+
+// queuedTurn is a turn waiting for a slot.
+type queuedTurn struct {
+	prompt string
+	opts   turnOpts
+}
+
+// started reports whether a turn just asked for runs or waits to.
+func started(t *Task) bool { return t.Status == Running || t.Status == Queued }
+
+// dispatch starts queued turns while slots are free, oldest first.
+func (b *board) dispatch() {
+	for len(b.queue) > 0 && len(b.runs) < b.maxRunning() {
+		t := b.queue[0]
+		b.queue = b.queue[1:]
+		q := t.pending
+		t.Status, t.pending = t.QueuedFrom, nil
+		b.turn(t, q.prompt, q.opts)
+	}
+}
+
+// dequeue takes a task's turn off the queue: it goes back where it was.
+func (b *board) dequeue(t *Task) {
+	if t.Status != Queued {
+		return
+	}
+	b.queue = slices.DeleteFunc(b.queue, func(v *Task) bool { return v == t })
+	t.Status, t.pending, t.rev = t.QueuedFrom, nil, nil
+	t.addLog("── taken off the queue")
+	b.save()
+}
+
+func (b *board) setMaxRunning(n int) {
+	b.MaxRunning = min(max(n, 1), 10)
+	b.dispatch()
+	b.save()
+}
+
+// turn runs one turn of the task's agent on a goroutine of its own, or,
+// with every slot taken, queues it.
 func (b *board) turn(t *Task, prompt string, o turnOpts) {
-	if _, running := b.runs[t.ID]; running {
+	if _, running := b.runs[t.ID]; running || t.Status == Queued {
 		return // one turn at a time per conversation
 	}
 	agent := t.Agent
@@ -299,6 +357,13 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 	}
 	if fi, err := os.Stat(t.Dir); err != nil || !fi.IsDir() {
 		t.Status, t.Err = Failed, "working directory not found: "+t.Dir
+		b.save()
+		return
+	}
+	if len(b.runs) >= b.maxRunning() {
+		t.QueuedFrom, t.Status, t.pending = t.Status, Queued, &queuedTurn{prompt, o}
+		b.queue = append(b.queue, t)
+		t.addLog(fmt.Sprintf("── queued: %d agents are running, the most at once", len(b.runs)))
 		b.save()
 		return
 	}
@@ -466,7 +531,7 @@ func (b *board) shared(t *Task) bool {
 // merge merges the task's branch into its base in your checkout, and marks
 // the task done.
 func (b *board) merge(t *Task) {
-	if t.WS == nil || t.merging || t.Status == Running {
+	if t.WS == nil || t.merging || started(t) {
 		return
 	}
 	t.merging = true
@@ -497,6 +562,7 @@ func modelSuffix(m string) string {
 // finish records a turn's outcome. A stopped turn rests where the task was
 // before it; a plan rests at Confirm; work at Review.
 func (b *board) finish(t *Task, r result, err error, took time.Duration, before Status, o turnOpts, g turnGit) {
+	defer b.dispatch() // a slot is free: the next turn waiting takes it
 	stopped := errors.Is(err, context.Canceled)
 	if cancel := b.runs[t.ID]; cancel != nil {
 		cancel()
@@ -559,6 +625,7 @@ func (b *board) finish(t *Task, r result, err error, took time.Duration, before 
 }
 
 func (b *board) stop(t *Task) {
+	b.dequeue(t)
 	if cancel := b.runs[t.ID]; cancel != nil {
 		cancel()
 	}
@@ -607,7 +674,7 @@ func (b *board) handoff(from *Task, agent string) {
 }
 
 func (b *board) move(t *Task, to Status) {
-	if t.Status == to || t.Status == Running {
+	if t.Status == to || started(t) {
 		return
 	}
 	if to == Running {

@@ -39,7 +39,7 @@ func (b *board) review(t *Task, reviewer string, rounds int) {
 
 func (b *board) reviewTurn(t *Task) {
 	b.turn(t, reviewPrompt(t, t.rev), turnOpts{reviewer: t.rev.reviewer})
-	if t.Status != Running { // it could not start
+	if !started(t) { // it could not start
 		t.rev = nil
 	}
 }
@@ -133,7 +133,7 @@ func (b *board) revise(t *Task, l *reviewLoop) {
 		prompt += " Then report what you changed."
 	}
 	b.turn(t, prompt, turnOpts{resume: true, plan: l.gate == Confirm, revision: true})
-	if t.Status != Running {
+	if !started(t) {
 		t.rev = nil
 	}
 }
