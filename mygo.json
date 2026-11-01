@@ -4,5 +4,6 @@
   "identifier": "io.github.lzhgus.agent-kanban",
   "version": "0.1.0",
   "copyright": "© 2026 lzhgus",
+  "icon": "assets/icon.png",
   "out": "build"
 }
