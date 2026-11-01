@@ -120,7 +120,7 @@ func (br *bridge) handle(turn *bridgeTurn, m rpcMsg) (any, *rpcError) {
 			"protocolVersion": p.ProtocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": bridgeName, "version": "0.1.0"},
-			"instructions":    "The Agent Kanban board you are working on: ask the user, file tasks for other agents, read the board.",
+			"instructions":    "The Agent Kanban board you are working on: ask the user, hand parts of your task to other agents and wait for them, message tasks, read the board.",
 		}, nil
 	case "ping":
 		return map[string]any{}, nil
@@ -163,27 +163,44 @@ func (br *bridge) call(turn *bridgeTurn, name string, args json.RawMessage) (str
 	if len(args) == 0 || string(args) == "null" {
 		args = json.RawMessage("{}")
 	}
-	type answer struct {
-		text string
-		err  error
+	if tool.blocking { // it waits here, and reads the board through sync
+		return tool.run(br.b, turn, args)
 	}
-	done := make(chan answer, 1)
-	br.b.update(func() {
-		text, err := tool.run(br.b, turn, args)
-		done <- answer{text, err}
-	})
-	select {
-	case a := <-done:
-		return a.text, a.err
-	case <-time.After(30 * time.Second):
+	var text string
+	var err error
+	if !br.b.sync(func() { text, err = tool.run(br.b, turn, args) }) {
 		return "", fmt.Errorf("the board did not answer")
 	}
+	return text, err
+}
+
+// sync runs f on the main thread, where the board lives, and waits for it:
+// false if the board did not get to it in time.
+func (b *board) sync(f func()) bool {
+	done := make(chan struct{})
+	b.update(func() { f(); close(done) })
+	select {
+	case <-done:
+		return true
+	case <-time.After(30 * time.Second):
+		return false
+	}
+}
+
+func (b *board) task(id int) *Task {
+	for _, t := range b.Tasks {
+		if t.ID == id {
+			return t
+		}
+	}
+	return nil
 }
 
 type bridgeTool struct {
 	name, description string
 	schema            map[string]any
 	readOnly          bool // reviewers get it too
+	blocking          bool // run off the main thread: it waits, reading the board with b.sync
 	run               func(b *board, turn *bridgeTurn, args json.RawMessage) (string, error)
 }
 
@@ -223,19 +240,24 @@ var bridgeTools = []bridgeTool{
 	},
 	{
 		name: "create_todo",
-		description: "File a new task on the board, for yourself or another agent (claude, antigravity, copilot), in the same folder as this one. " +
-			"Use it for follow-up work outside this task, or work another agent should do. With start, it runs right away; otherwise it waits in To Do. " +
-			"A task you file plans first: the user confirms its plan before it changes anything.",
+		description: "File a new task on the board, for yourself or another agent (claude, antigravity, copilot). " +
+			"With subtask, it is part of this task, handed to another agent: it starts right away, on a new branch from this task's last commit, " +
+			"needs no plan confirmed, and you can wait_todo for it, message_todo it, and git merge its branch into yours. " +
+			"Without subtask, it is separate work in this task's folder, such as a follow-up: it plans first, and the user confirms its plan before it changes anything; " +
+			"with start it runs right away, otherwise it waits in To Do. With read_only, its agent changes no files: research or a review, ending in a report.",
 		schema: object(map[string]any{
-			"title":  str("A short title."),
-			"prompt": str("What the agent should do, with the context it needs: it does not see this conversation."),
-			"agent":  map[string]any{"type": "string", "enum": agentChoices, "description": "Who does it: an agent, or any, whichever is free when it starts; this task's agent if left out."},
-			"start":  map[string]any{"type": "boolean", "description": "Run it right away."},
+			"title":     str("A short title."),
+			"prompt":    str("What the agent should do, with the context it needs: it does not see this conversation."),
+			"agent":     map[string]any{"type": "string", "enum": agentChoices, "description": "Who does it: an agent, or any, whichever is free when it starts; this task's agent if left out."},
+			"subtask":   map[string]any{"type": "boolean", "description": "Part of this task: it starts now, on a branch of yours, with no plan to confirm."},
+			"read_only": map[string]any{"type": "boolean", "description": "Its agent reads but changes no files, and reports what it found."},
+			"start":     map[string]any{"type": "boolean", "description": "Run it right away (a subtask always does)."},
 		}, "title", "prompt"),
 		run: func(b *board, turn *bridgeTurn, args json.RawMessage) (string, error) {
 			var a struct {
 				Title, Prompt, Agent string
-				Start                bool
+				Start, Subtask       bool
+				ReadOnly             bool `json:"read_only"`
 			}
 			if err := json.Unmarshal(args, &a); err != nil || strings.TrimSpace(a.Prompt) == "" {
 				return "", fmt.Errorf("create_todo needs a title and a prompt")
@@ -256,10 +278,21 @@ var bridgeTools = []bridgeTool{
 			}
 			turn.created++
 			b.NextID++
-			t := &Task{ID: b.NextID, Title: title, Prompt: strings.TrimSpace(a.Prompt), Agent: a.Agent, Dir: from.Dir, Status: Todo, From: from.ID, PlanFirst: true, ByAgent: true} // a person confirms what agents file
+			t := &Task{ID: b.NextID, Title: title, Prompt: strings.TrimSpace(a.Prompt), Agent: a.Agent, Dir: from.Dir, Status: Todo, From: from.ID, ReadOnly: a.ReadOnly,
+				PlanFirst: !a.Subtask, ByAgent: !a.Subtask, Sub: a.Subtask} // a person confirms what agents file, but for parts of work already theirs
+			if t.Agent == from.Agent { // the same agent: the model the user chose for it
+				t.Model = from.Model
+			}
+			kind := "filed"
+			if a.Subtask {
+				kind = "subtask"
+				if from.WS != nil { // a branch of this task's branch: its merge goes into this one
+					t.Dir = from.WS.Dir()
+				}
+			}
 			b.Tasks = append(b.Tasks, t)
-			from.addLog(fmt.Sprintf("+ filed #%d for %s: %s", t.ID, t.Agent, title))
-			if a.Start {
+			from.addLog(fmt.Sprintf("+ %s #%d for %s: %s", kind, t.ID, t.Agent, title))
+			if a.Start || a.Subtask {
 				b.start(t)
 			} else {
 				b.save()
@@ -307,7 +340,123 @@ var bridgeTools = []bridgeTool{
 			return "", fmt.Errorf("no task #%d: list_todos shows them", a.ID)
 		},
 	},
+	{
+		name: "wait_todo",
+		description: "Wait for a task to finish its turn, such as a subtask you filed, and read it: its status, branch, changes and report. " +
+			"It returns when the task stops running, or after timeout_seconds with it still running: call it again to wait on.",
+		schema: object(map[string]any{
+			"id":              map[string]any{"type": "integer", "description": "The task's number."},
+			"timeout_seconds": map[string]any{"type": "integer", "description": "How long to wait at most: 300 if left out, at most 600."},
+		}, "id"),
+		readOnly: true,
+		blocking: true,
+		run: func(b *board, turn *bridgeTurn, args json.RawMessage) (string, error) {
+			var a struct {
+				ID      int
+				Timeout int `json:"timeout_seconds"`
+			}
+			json.Unmarshal(args, &a)
+			if a.Timeout <= 0 {
+				a.Timeout = 300
+			}
+			a.Timeout = min(a.Timeout, 600)
+			deadline := time.Now().Add(time.Duration(a.Timeout) * time.Second)
+			for logged := false; ; time.Sleep(waitPoll) {
+				var desc string
+				var status Status
+				var found, running, gone bool
+				if !b.sync(func() {
+					if _, ok := b.runs[turn.task.ID]; !ok { // the turn waiting ended: stopped
+						gone = true
+						return
+					}
+					t := b.task(a.ID)
+					if found = t != nil && t != turn.task; !found {
+						return
+					}
+					running, status = started(t), t.Status
+					if !running || time.Now().After(deadline) {
+						desc = describe(t)
+					}
+					if !logged {
+						turn.task.addLog(fmt.Sprintf("⧗ waiting for #%d", t.ID))
+						logged = true
+					}
+				}) {
+					return "", fmt.Errorf("the board did not answer")
+				}
+				switch {
+				case gone:
+					return "", fmt.Errorf("your turn ended")
+				case !found:
+					return "", fmt.Errorf("no other task #%d: list_todos shows them", a.ID)
+				case !running:
+					return fmt.Sprintf("Task #%d is %s.\n\n%s", a.ID, status, desc), nil
+				case desc != "":
+					return fmt.Sprintf("Task #%d is still %s after %ds; call wait_todo again to wait on.\n\n%s", a.ID, status, a.Timeout, desc), nil
+				}
+			}
+		},
+	},
+	{
+		name: "message_todo",
+		description: "Send a message to another task's agent: while it works, it reads it at its next step (or after its turn, for agents that cannot), " +
+			"to steer it or give it context it needs. A subtask you filed that has finished takes it as its next turn, to ask it for more. " +
+			"Other tasks that wait for the user take no messages.",
+		schema: object(map[string]any{
+			"id":      map[string]any{"type": "integer", "description": "The task's number."},
+			"message": str("The message, with the context it needs."),
+		}, "id", "message"),
+		run: func(b *board, turn *bridgeTurn, args json.RawMessage) (string, error) {
+			var a struct {
+				ID      int
+				Message string
+			}
+			if err := json.Unmarshal(args, &a); err != nil || strings.TrimSpace(a.Message) == "" {
+				return "", fmt.Errorf("message_todo needs an id and a message")
+			}
+			t, from := b.task(a.ID), turn.task
+			if t == nil || t == from {
+				return "", fmt.Errorf("no other task #%d: list_todos shows them", a.ID)
+			}
+			who := fmt.Sprintf("#%d (%s)", from.ID, from.Agent)
+			if _, running := b.runs[t.ID]; !running && t.Status != Queued && t.From != from.ID {
+				return "", fmt.Errorf("task #%d is %s and waits for the user; only a running task, or a subtask of yours, takes messages", t.ID, t.Status)
+			}
+			text := "A message from task " + who + ", another agent on the board:\n\n" + strings.TrimSpace(a.Message)
+			switch b.say(t, text, who) {
+			case saidLive:
+				from.addLog(fmt.Sprintf("→ #%d, while it works: %s", t.ID, firstLine(a.Message)))
+				return fmt.Sprintf("Delivered: #%d reads it at its next step.", t.ID), nil
+			case saidLater:
+				from.addLog(fmt.Sprintf("→ #%d, after its turn: %s", t.ID, firstLine(a.Message)))
+				return fmt.Sprintf("Queued: #%d gets it when its turn ends.", t.ID), nil
+			case saidTurn:
+				from.addLog(fmt.Sprintf("→ #%d: %s", t.ID, firstLine(a.Message)))
+				return fmt.Sprintf("Sent: #%d is working on it; wait_todo waits for its answer.", t.ID), nil
+			}
+			return "", fmt.Errorf("task #%d has no conversation to continue", t.ID)
+		},
+	},
+	{
+		name:        "report_status",
+		description: "Say in a few words what you are doing now, such as which step of how many, or what you wait for: it shows on your task's card while you work.",
+		schema:      object(map[string]any{"status": str("A few words, such as \"step 2/4: writing the tests\".")}, "status"),
+		run: func(b *board, turn *bridgeTurn, args json.RawMessage) (string, error) {
+			var a struct{ Status string }
+			json.Unmarshal(args, &a)
+			if a.Status = firstLine(a.Status); a.Status == "" {
+				return "", fmt.Errorf("report_status needs a status")
+			}
+			turn.task.Note = clip(a.Status, 120)
+			turn.task.addLog("◆ " + turn.task.Note)
+			return "Shown on your card.", nil
+		},
+	},
 }
+
+// waitPoll is how often wait_todo looks at the task it waits for.
+var waitPoll = time.Second
 
 func describe(t *Task) string {
 	var s strings.Builder

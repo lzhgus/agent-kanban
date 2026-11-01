@@ -53,6 +53,8 @@ Agent Kanban 是一个桌面应用，把 Claude Code、GitHub Copilot CLI 和 An
 
 - **任务就是对话。** 开始一个任务，之后回复它来要求修改：agent 会在同一个会话里
   从上次停下的地方继续。
+- **干活时也能插话。** 在运行中的任务里直接输入：Claude Code 会在下一步就读到，
+  在同一轮里一并处理；其他 agent 在这一轮结束后收到。
 - **每个任务一个分支。** 在 git 仓库中，每个任务都在自己的 worktree 里、
   `kanban/<id>-<title>` 分支上工作，所以 agent 永远不会碰你的工作区，也不会碰彼此的文件。
   每一轮都以一次 commit 结束，Changes 标签页显示 diff，准备好之后点 **Merge**
@@ -60,8 +62,15 @@ Agent Kanban 是一个桌面应用，把 Claude Code、GitHub Copilot CLI 和 An
 - **先计划。** 任务可以从一轮只读的计划开始。计划会等你确认或修改之后，才会改动任何代码。
 - **AI 审查。** 在计划阶段或改动完成后，可以让另一个 agent 来审查。任务的 agent 根据意见修改，
   循环进行，直到审查者通过或你设定的轮数用完。最终决定权在你。
-- **agent 之间协作。** 内置的 MCP 服务器让 agent 可以向你提问（`ask_user`）、
-  给其他 agent 创建任务（`create_todo`）、读取看板（`list_todos`、`get_todo`）。
+- **agent 之间协作。** 内置的 MCP 服务器让 agent 可以把自己任务的一部分作为子任务
+  交给另一个 agent：子任务在它分支的一个新分支上工作，不需要确认计划；之后可以等它完成
+  （`wait_todo`）、在它工作时发消息或之后追问（`message_todo`），再把它的分支合并进来。
+  新建任务时勾选 **Lead**，它的 agent 就会这样拆分工作。agent 还可以向你提问
+  （`ask_user`）、创建后续任务（`create_todo`）、在卡片上显示自己在做什么
+  （`report_status`）、读取看板（`list_todos`、`get_todo`）。
+- **需要你时会告诉你。** 停在计划、提问、完成的工作或错误上的任务会一直标记，直到你打开它。
+  Dock 角标显示数量，应用在后台时会发通知，⌘J 打开下一个。
+- **重启不中断。** 一轮还没跑完就退出应用，再打开时 agent 会接着原来的会话继续。
 - **用量一目了然。** 按任务、按 agent 统计 token 和费用，以及每个 agent 的套餐窗口
   （Claude 的 5 小时和每周限额、Copilot 的 premium requests 等）和重置时间。
 - **排队。** 选择同时运行几个 agent，其余的排队等候。
@@ -147,6 +156,13 @@ To Do ─▶ Running (plan) ─▶ Confirm ─▶ Running ─▶ Review ─▶ D
 ```sh
 go test ./...
 go vet ./...
+```
+
+用真实的 Claude Code CLI 做端到端检查（会用掉一点你的套餐额度；`EVAL_MODEL` 指定模型，
+默认 haiku）：
+
+```sh
+go test -tags eval -run TestEval -v -timeout 20m
 ```
 
 基于 [MyGo](https://github.com/egoist/mygo) 构建，它用纯 Go 绘制原生界面。

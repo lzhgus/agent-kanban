@@ -42,6 +42,9 @@ type result struct {
 	Text       string // the final answer, handed to the next agent on a handoff
 	Err        string
 	SessionRef string // the agent's conversation, to resume on the next turn
+	// Unsent are messages the turn took in while it ran but could not pass
+	// to the agent: they go in its next turn.
+	Unsent []string
 }
 
 // emit receives a log line as the agent works. It is called from the run's
@@ -57,6 +60,11 @@ var drivers = map[string]driver{
 }
 
 var agentNames = []string{"claude", "antigravity", "copilot"}
+
+// liveAgents take messages while a turn runs, from Task.inbox: the agent
+// reads them at its next step. Others get them in a turn after the one
+// running.
+var liveAgents = map[string]bool{"claude": true}
 
 // command starts bin in its own process group, so stopping a run also ends
 // the tools the agent spawned.
@@ -129,9 +137,15 @@ func firstLine(s string) string {
 // line, ending with a "result" that carries per-model usage and the cost.
 
 // claudeArgs starts the session the board named, so the watcher knows it is
-// the board's, or resumes it: --resume keeps its id.
+// the board's, or resumes it: --resume keeps its id. A turn that takes
+// messages while it runs reads its prompt, and them, from stdin; Claude Code
+// echoes each as it takes it in.
 func claudeArgs(t Task) []string {
-	args := []string{"-p", t.Prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions"}
+	args := []string{"-p", t.Prompt}
+	if t.inbox != nil {
+		args = []string{"-p", "--input-format", "stream-json", "--replay-user-messages"}
+	}
+	args = append(args, "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions")
 	if t.Model != "" {
 		args = append(args, "--model", t.Model)
 	}
@@ -156,6 +170,13 @@ func runClaude(ctx context.Context, t Task, log emit) (result, error) {
 	cmd := command(ctx, t.Dir, "claude", claudeArgs(t)...)
 	stderr := &stderrTail{}
 	cmd.Stderr = stderr
+	var in io.WriteCloser
+	if t.inbox != nil {
+		var err error
+		if in, err = cmd.StdinPipe(); err != nil {
+			return result{}, err
+		}
+	}
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		return result{}, err
@@ -164,8 +185,12 @@ func runClaude(ctx context.Context, t Task, log emit) (result, error) {
 		return result{}, err
 	}
 	var r result
-	for sc := newScanner(out); sc.Scan(); {
-		claudeLine(sc.Bytes(), &r, log)
+	if in == nil {
+		for sc := newScanner(out); sc.Scan(); {
+			claudeLine(sc.Bytes(), &r, log)
+		}
+	} else {
+		claudeLive(t, in, out, &r, log)
 	}
 	if err := cmd.Wait(); err != nil && r.Err == "" {
 		return r, exitErr(err, stderr)
@@ -173,16 +198,70 @@ func runClaude(ctx context.Context, t Task, log emit) (result, error) {
 	return r, nil
 }
 
-func claudeLine(line []byte, r *result, log emit) {
+// claudeLive runs a turn that takes messages while it works: the prompt and
+// each message go in as user messages, and Claude Code folds a message into
+// the work at its next step. Once a result comes with every message taken
+// in, stdin closes and the turn ends; a message that came too late for the
+// work runs on after it, in the same process, ending in a result of its own.
+func claudeLive(t Task, in io.WriteCloser, out io.Reader, r *result, log emit) {
+	lines := make(chan string)
+	go func() {
+		defer close(lines)
+		for sc := newScanner(out); sc.Scan(); {
+			lines <- sc.Text()
+		}
+	}()
+	inbox, pending, n := t.inbox, map[string]bool{}, 0
+	send := func(text string) bool {
+		n++
+		id := fmt.Sprintf("%s-%d", t.SessionRef, n) // ponytail: echoed back as is; any unique string does
+		msg, _ := json.Marshal(map[string]any{"type": "user", "uuid": id, "message": map[string]any{"role": "user", "content": text}})
+		if _, err := in.Write(append(msg, '\n')); err != nil {
+			return false
+		}
+		pending[id] = true
+		return true
+	}
+	if !send(t.Prompt) {
+		in.Close()
+		for range lines {
+		}
+		return
+	}
+	for {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				in.Close()
+				return
+			}
+			ev := claudeLine([]byte(line), r, log)
+			delete(pending, ev.took)
+			if ev.result && len(pending) == 0 && inbox != nil {
+				in.Close() // done: what comes now waits for a turn of its own
+				inbox = nil
+			}
+		case msg := <-inbox:
+			if !send(msg) {
+				r.Unsent = append(r.Unsent, msg)
+			}
+		}
+	}
+}
+
+// claudeEvent is what a line of Claude Code's output meant for the turn.
+type claudeEvent struct {
+	took   string // the id of the message Claude Code took in
+	result bool   // the work so far ended
+}
+
+func claudeLine(line []byte, r *result, log emit) (ev claudeEvent) {
 	var m struct {
-		Type    string `json:"type"`
-		Message struct {
-			Content []struct {
-				Type  string         `json:"type"`
-				Text  string         `json:"text"`
-				Name  string         `json:"name"`
-				Input map[string]any `json:"input"`
-			} `json:"content"`
+		Type     string `json:"type"`
+		UUID     string `json:"uuid"`
+		IsReplay bool   `json:"isReplay"`
+		Message  struct {
+			Content json.RawMessage `json:"content"` // blocks; a string in a user message echoed back
 		} `json:"message"`
 		SessionID       string  `json:"session_id"`
 		ParentToolUseID *string `json:"parent_tool_use_id"`
@@ -204,11 +283,22 @@ func claudeLine(line []byte, r *result, log emit) {
 		r.SessionRef = m.SessionID
 	}
 	switch m.Type {
+	case "user":
+		if m.IsReplay {
+			ev.took = m.UUID
+		}
 	case "assistant":
 		if m.ParentToolUseID != nil { // a subagent's message, not the main loop's
 			return
 		}
-		for _, b := range m.Message.Content {
+		var blocks []struct {
+			Type  string         `json:"type"`
+			Text  string         `json:"text"`
+			Name  string         `json:"name"`
+			Input map[string]any `json:"input"`
+		}
+		json.Unmarshal(m.Message.Content, &blocks)
+		for _, b := range blocks {
 			switch b.Type {
 			case "text":
 				log(b.Text)
@@ -216,8 +306,9 @@ func claudeLine(line []byte, r *result, log emit) {
 				log(toolLine(b.Name, b.Input))
 			}
 		}
-	case "result":
-		r.Text = m.Result
+	case "result": // its usage and cost count the whole process, every result so far
+		ev.result = true
+		r.Text, r.Usage, r.Err = m.Result, Usage{}, ""
 		for _, u := range m.ModelUsage {
 			r.Usage.add(Usage{Input: u.InputTokens, Output: u.OutputTokens, CacheRead: u.CacheReadInputTokens, CacheWrite: u.CacheCreationInputTokens})
 		}
@@ -226,6 +317,7 @@ func claudeLine(line []byte, r *result, log emit) {
 			r.Err = "Claude Code: " + firstLine(m.Result+" "+m.Subtype)
 		}
 	}
+	return ev
 }
 
 // ── Antigravity ─────────────────────────────────────────────────────────────

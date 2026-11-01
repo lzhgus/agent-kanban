@@ -57,6 +57,9 @@ it supports, installed and signed in. You don't need Go unless you
 
 - **Tasks are conversations.** Start a task, then reply to it to ask for
   changes: the agent picks up where it stopped, in the same session.
+- **Talk to it while it works.** Type into a running task: Claude Code reads
+  your message at its next step, in the same turn; other agents get it when
+  their turn ends.
 - **A branch per task.** In a git repository, every task works in its own
   worktree on a `kanban/<id>-<title>` branch, so agents never touch your
   checkout or each other's files. Each turn ends in a commit, the Changes tab
@@ -66,9 +69,20 @@ it supports, installed and signed in. You don't need Go unless you
 - **AI review.** At a plan or at finished changes, have another agent review.
   The task's agent revises, and the loop runs until the reviewer approves or
   the rounds you chose run out. The decision stays yours.
-- **Agents work together.** A built-in MCP server lets agents ask you a
-  question (`ask_user`), file tasks for other agents (`create_todo`), and read
-  the board (`list_todos`, `get_todo`).
+- **Agents work together.** A built-in MCP server lets an agent hand part
+  of its task to another agent as a subtask, on a branch of its own branch
+  and with no plan to confirm, then wait for it (`wait_todo`), message it
+  while it works or ask it for more (`message_todo`), and merge its branch.
+  Tick **Lead** on a new task to have its agent split the work this way.
+  Agents can also ask you a question (`ask_user`), file follow-up tasks
+  (`create_todo`), show what they are doing on their card (`report_status`),
+  and read the board (`list_todos`, `get_todo`).
+- **It tells you when it needs you.** A task that stops at a plan, a
+  question, finished work or an error is marked until you open it. The Dock
+  badge counts them, a notification names each while the app is in the
+  background, and ⌘J opens the next.
+- **Survives a restart.** Quit the app in the middle of a turn, and when it
+  opens again the agent resumes its conversation where it was.
 - **Usage at a glance.** Tokens and cost per task and per agent, and each
   agent's plan windows (Claude's 5-hour and weekly limits, Copilot's premium
   requests, and so on) with when they reset.
@@ -163,6 +177,13 @@ To Do ─▶ Running (plan) ─▶ Confirm ─▶ Running ─▶ Review ─▶ D
 ```sh
 go test ./...
 go vet ./...
+```
+
+End-to-end checks against the real Claude Code CLI (they use a little of
+your plan; `EVAL_MODEL` picks the model, haiku by default):
+
+```sh
+go test -tags eval -run TestEval -v -timeout 20m
 ```
 
 Built with [MyGo](https://github.com/egoist/mygo), which draws the native UI

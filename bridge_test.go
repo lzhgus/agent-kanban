@@ -82,7 +82,7 @@ func TestBridgeProtocol(t *testing.T) {
 		t.Errorf("a notification: %d", code)
 	}
 	_, out, _ = mcpPost(url, "tools/list", 2, nil)
-	if n := len(out["result"].(map[string]any)["tools"].([]any)); n != 4 {
+	if n := len(out["result"].(map[string]any)["tools"].([]any)); n != 7 {
 		t.Errorf("%d tools for a builder", n)
 	}
 	if _, out, _ = mcpPost(url, "nope", 3, nil); out["error"] == nil {
@@ -127,7 +127,7 @@ func TestBridgeProtocol(t *testing.T) {
 	// A reviewer reads; a closed turn's URL is gone.
 	rurl, rclose := br.open(task, true)
 	_, out, _ = mcpPost(rurl, "tools/list", 4, nil)
-	if n := len(out["result"].(map[string]any)["tools"].([]any)); n != 2 {
+	if n := len(out["result"].(map[string]any)["tools"].([]any)); n != 3 {
 		t.Errorf("%d tools for a reviewer", n)
 	}
 	if _, isErr := callTool(t, rurl, "ask_user", map[string]any{"question": "?"}); !isErr {

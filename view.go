@@ -125,6 +125,8 @@ func (b *board) view(c *ui.Context) {
 		p = darkPalette
 	}
 	c.SetTheme(p.theme(c.Theme()))
+	b.look()
+	c.OnShortcut(ui.Cmd, ui.KeyJ, b.jumpNext)
 	vibrant := c.Vibrancy()
 	if vibrant {
 		c.Root().Background(ui.Transparent)
@@ -164,6 +166,7 @@ func (b *board) sidebarView(c *ui.Context, p palette) {
 		if button(c, p, "new-task", "New task", iconPlus, primary).FillWidth().Clicked() {
 			b.composing = !b.composing
 		}
+		b.waitingRow(c, p)
 		ui.Text(c, "AGENTS").FontSize(10.5).Bold().LetterSpacing(0.8).TextColor(p.muted).Padding(18, 6, 6, 6)
 		b.agentRow(c, p, "", "All agents")
 		for _, name := range []string{"claude", "codex", "antigravity", "copilot"} {
@@ -176,6 +179,27 @@ func (b *board) sidebarView(c *ui.Context, p palette) {
 			ui.Text(c, "Watching Claude Code, Codex & Antigravity").FontSize(11).TextColor(p.muted).Wrap().Shrink(1).MinWidth(0)
 		})
 		ui.Text(c, "Outside sessions idle 2 h move to Done.").FontSize(11).TextColor(p.muted).Wrap().Padding(0, 6)
+	})
+}
+
+// waitingRow counts the tasks waiting for you; a click, or Cmd+J, opens the
+// next.
+func (b *board) waitingRow(c *ui.Context, p palette) {
+	n := len(b.unread())
+	if n == 0 {
+		return
+	}
+	row := ui.ButtonBase(c.Key("waiting")).Label("Next waiting for you").FillWidth().Padding(7, 8).Radius(controlRadius).Gap(8).AlignItems(ui.Center).Cursor(ui.CursorPointer)
+	if row.Hovered() {
+		row.Background(p.ink.Alpha(0.05))
+	}
+	if row.Clicked() {
+		b.jumpNext()
+	}
+	row.Children(func() {
+		ui.Box(c).Size(8, 8).Radius(4).Background(p.amber).Margin(0, 2)
+		ui.Text(c, fmt.Sprintf("%d waiting for you", n)).FontSize(13).FontWeight(500).Grow(1)
+		ui.Text(c, "⌘J").FontSize(11).Font("monospace").TextColor(p.muted)
 	})
 }
 
@@ -362,6 +386,7 @@ func (b *board) composerView(c *ui.Context, p palette) {
 			})
 			ui.TextInput(c.Key("title"), &b.title).Placeholder("Title (optional)").Label("Title").Width(160)
 			ui.Checkbox(c.Key("plan-first"), &b.PlanFirst, "Plan first").Tooltip("The agent writes a plan, without changing files, and waits for you to confirm it")
+			ui.Checkbox(c.Key("lead"), &b.lead, "Lead").Tooltip("The agent leads: it splits the work into subtasks for other agents, waits for them and merges their branches")
 		})
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "Runs headless with permissions bypassed: pick a folder you trust it with.").FontSize(11).TextColor(p.muted).Grow(1)
@@ -543,10 +568,10 @@ func (b *board) cardView(c *ui.Context, p palette, task *Task) {
 		e.Drag(task)
 	}
 	if e.Clicked() {
-		b.selected, b.selectedSession, b.tab = task, "", ""
+		b.open(task)
 	}
 	e.Children(func() {
-		ui.Row(c).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			agentLabel(c, p, task.Agent, task.Status == Running)
 			ui.Box(c).Grow(1)
 			switch {
@@ -560,10 +585,22 @@ func (b *board) cardView(c *ui.Context, p palette, task *Task) {
 				pill(c, "AI review", p.sky)
 			case task.Status == Confirm:
 				pill(c, "Plan", p.amber)
+			case task.Lead:
+				pill(c, "Lead", p.brand)
+			case task.Sub:
+				pill(c, fmt.Sprintf("Sub of #%d", task.From), p.muted)
+			case task.ReadOnly:
+				pill(c, "Read-only", p.muted)
+			}
+			if task.Unread {
+				ui.Box(c).Size(7, 7).Radius(4).Background(p.amber).Tooltip("Waiting for you: ⌘J opens the next")
 			}
 			ui.Text(c, fmt.Sprintf("#%d", task.ID)).FontSize(11).Font("monospace").TextColor(p.muted)
 		})
 		ui.Text(c, task.Title).FontSize(13).FontWeight(600).Wrap().MaxLines(2)
+		if task.Note != "" && started(task) {
+			ui.Text(c, "◆ "+task.Note).FontSize(11.5).TextColor(p.brand).MaxLines(2).Wrap()
+		}
 		meta := filepath.Base(task.Dir)
 		if u := task.spent(); u.total() > 0 {
 			meta += " · " + tokens(u.total()) + " tok" + cost(u.CostUSD)
@@ -698,11 +735,11 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 			label = "Question"
 		case task.Status == Confirm:
 			label = "Plan ready"
-		case task.Status == Running && task.rev != nil && strings.HasPrefix(task.doing, "review"):
+		case task.Status == Running && task.rev != nil && strings.HasPrefix(task.Doing, "review"):
 			label = fmt.Sprintf("Reviewing · %d/%d", task.rev.round, task.rev.rounds)
-		case task.Status == Running && task.doing == "revision":
+		case task.Status == Running && task.Doing == "revision":
 			label = "Revising"
-		case task.Status == Running && task.doing == "plan":
+		case task.Status == Running && task.Doing == "plan":
 			label = "Planning"
 		case task.Status == Queued:
 			label = fmt.Sprintf("Queued · %d of %d", slices.Index(b.queue, task)+1, len(b.queue))
@@ -797,7 +834,10 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 		default:
 			logView(c, p, "log", append([]string{"› " + firstLine(task.Prompt)}, task.Log...))
 		}
-		if !started(task) && task.Status != Todo && task.SessionRef != "" {
+		switch {
+		case task.Status == Running && task.rev == nil: // tell it something while it works
+			replyView(c, p, b, task)
+		case !started(task) && task.Status != Todo && task.SessionRef != "":
 			if task.Question != nil {
 				questionCard(c, p, b, task)
 			}
@@ -1007,6 +1047,12 @@ func questionCard(c *ui.Context, p palette, b *board, t *Task) {
 }
 
 func replyHint(t *Task) string {
+	if t.Status == Running {
+		if liveAgents[t.Agent] {
+			return "Tell " + t.Agent + " something while it works: it reads it at its next step"
+		}
+		return "Tell " + t.Agent + " something: it gets it when this turn ends"
+	}
 	if t.Question != nil {
 		return "Answer " + t.Agent + "'s question"
 	}

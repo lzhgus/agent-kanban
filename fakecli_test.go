@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMain(m *testing.M) {
@@ -25,6 +26,9 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	case "copilot":
 		fakeCopilot()
+		os.Exit(0)
+	case "claude":
+		fakeClaude()
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
@@ -194,5 +198,72 @@ func TestFakeCopilot(t *testing.T) {
 	r, methods, lines := run(Task{Prompt: "again", SessionRef: "gone", resume: true}) // lost: a new session
 	if r.SessionRef != "s-new" || !slices.Contains(methods, "session.create ") || !strings.Contains(strings.Join(lines, "\n"), "couldn't resume") {
 		t.Errorf("a lost session: %+v, calls %q, log %q", r, methods, lines)
+	}
+}
+
+// fakeClaudeCLI puts a script named claude first on PATH.
+func fakeClaudeCLI(t *testing.T) (logFile string) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	script := fmt.Sprintf("#!/bin/sh\nFAKE_CLI=claude exec %q \"$@\"\n", exe)
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	logFile = filepath.Join(t.TempDir(), "calls")
+	t.Setenv("FAKE_LOG", logFile)
+	return logFile
+}
+
+// fakeClaude plays Claude Code taking messages while it works
+// (--input-format stream-json --replay-user-messages): it echoes each user
+// message as it takes it in, folds the messages that come within a moment
+// of one into the same work (none for a prompt that starts with "quick"),
+// and ends each work in a result whose usage counts the whole process.
+func fakeClaude() {
+	fakeLog("args %s", strings.Join(os.Args[1:], " "))
+	in := make(chan map[string]any)
+	go func() {
+		defer close(in)
+		for sc := bufio.NewScanner(os.Stdin); sc.Scan(); {
+			var m map[string]any
+			if json.Unmarshal(sc.Bytes(), &m) == nil {
+				in <- m
+			}
+		}
+	}()
+	out := json.NewEncoder(os.Stdout)
+	out.Encode(map[string]any{"type": "system", "subtype": "init", "session_id": "fake-session"})
+	take := func(m map[string]any) string {
+		out.Encode(map[string]any{"type": "user", "isReplay": true, "uuid": m["uuid"], "message": m["message"]})
+		text, _ := m["message"].(map[string]any)["content"].(string)
+		fakeLog("took %s", text)
+		return text
+	}
+	input := 0
+	for m := range in {
+		got := []string{take(m)}
+		if !strings.HasPrefix(got[0], "quick") {
+		window:
+			for wait := time.After(300 * time.Millisecond); ; {
+				select {
+				case m, ok := <-in:
+					if !ok {
+						break window
+					}
+					got = append(got, take(m))
+				case <-wait:
+					break window
+				}
+			}
+		}
+		input += 10
+		text := "got: " + strings.Join(got, " | ")
+		out.Encode(map[string]any{"type": "assistant", "message": map[string]any{"content": []map[string]any{{"type": "text", "text": text}}}})
+		out.Encode(map[string]any{"type": "result", "subtype": "success", "result": text, "session_id": "fake-session", "total_cost_usd": float64(input) / 1000,
+			"modelUsage": map[string]any{"fake": map[string]any{"inputTokens": input, "outputTokens": 1}}})
 	}
 }

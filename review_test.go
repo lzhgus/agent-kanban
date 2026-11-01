@@ -179,7 +179,7 @@ func TestReviewStopAndFail(t *testing.T) {
 	drain(task)
 
 	b.review(task, "copilot", 3)
-	for task.doing != "revision" { // the review asked for changes; the revision runs
+	for task.Doing != "revision" { // the review asked for changes; the revision runs
 		(<-queue)()
 	}
 	b.stop(task)

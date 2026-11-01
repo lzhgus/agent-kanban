@@ -82,15 +82,33 @@ type Task struct {
 	Question *Question
 	// ByAgent: an agent filed it (create_todo); auto pickup plans it first.
 	ByAgent bool
+	// Unread: its turn ended where it waits for you, and you have not
+	// looked at it since.
+	Unread bool
+	// Doing is the last turn's kind ("turn 2", "plan", "review 1/3", …):
+	// its label while it runs, and after a restart, whether to resume it.
+	Doing string
+	// Asides are messages for its agent that wait for the turn running to
+	// end: they are its next turn.
+	Asides []string
+	// Note is what its agent last said it is doing (report_status).
+	Note string
+	// ReadOnly: every turn may read but not write, as research does.
+	ReadOnly bool
+	// Sub: part of the task it came From, filed by that task's agent. It
+	// works on a branch of that task's branch, and needs no plan confirmed.
+	Sub bool
+	// Lead: its agent splits the work into subtasks for other agents.
+	Lead bool
 
-	resume   bool   // this turn continues SessionRef (the drivers' copy only)
-	readOnly bool   // this turn may read but not write (the drivers' copy only)
-	draft    string // the reply being written in the detail panel
+	resume   bool          // this turn continues SessionRef (the drivers' copy only)
+	readOnly bool          // this turn may read but not write (the drivers' copy only)
+	draft    string        // the reply being written in the detail panel
+	inbox    <-chan string // messages while the turn runs, for a live agent (the drivers' copy only)
 	merging  bool
 	rev      *reviewLoop // the AI review going on, if one is
 	pending  *queuedTurn // the turn waiting in the queue
 	mcpURL   string      // the board's MCP server for this turn (the drivers' copy only)
-	doing    string      // the running turn's kind, for its label
 	picked   bool        // auto pickup started its turn: its agent is busy with it
 }
 
@@ -159,18 +177,26 @@ type board struct {
 	quick           string            // its text
 	quickAgent      string            // and its agent
 	runs            map[int]context.CancelFunc
-	queue           []*Task        // tasks whose turn waits for a slot, first come first
-	procs           sync.WaitGroup // drivers still running, for quitting
-	update          func(func())   // runs a function on the main thread: Window.Update
+	inboxes         map[int]chan string // the running turns' messages, of the live agents
+	queue           []*Task             // tasks whose turn waits for a slot, first come first
+	procs           sync.WaitGroup      // drivers still running, for quitting
+	update          func(func())        // runs a function on the main thread: Window.Update
+	interrupted     []*Task             // tasks whose turn the app quit under, to resume
+	// Getting your attention (attention.go); nil without a window.
+	notify     func(notice)
+	focused    func() bool
+	badge      func(int)
+	badgeShown int
 
 	// the new-task form, the handoff picker and the review row
 	title, prompt, agent, model, dir string
+	lead                             bool
 	reviewer, rounds                 string
 	reviewerFor                      *Task
 }
 
 func newBoard(path string) *board {
-	b := &board{path: path, runs: map[int]context.CancelFunc{}, agent: agentNames[0], rounds: roundChoices[0], quotaKick: make(chan struct{}, 1),
+	b := &board{path: path, runs: map[int]context.CancelFunc{}, inboxes: map[int]chan string{}, agent: agentNames[0], rounds: roundChoices[0], quotaKick: make(chan struct{}, 1),
 		worktrees: filepath.Join(filepath.Dir(path), "worktrees")}
 	if path == "" {
 		b.worktrees = filepath.Join(os.TempDir(), "agent-kanban-worktrees")
@@ -186,7 +212,7 @@ func newBoard(path string) *board {
 	for _, t := range b.Tasks {
 		switch t.Status {
 		case Running: // the app quit under it
-			t.Status, t.Err = Failed, "interrupted: the app quit while it ran"
+			b.quitUnder(t)
 		case Queued: // the turn waiting is gone with the app
 			t.Status = t.QueuedFrom
 			t.addLog("── the queued turn was dropped: the app quit")
@@ -238,7 +264,8 @@ func (b *board) add(run bool) {
 		title = firstLine(prompt)
 	}
 	t := b.file(title, prompt, b.agent, strings.TrimSpace(b.model))
-	b.title, b.prompt = "", ""
+	t.Lead = b.lead
+	b.title, b.prompt, b.lead = "", "", false
 	b.selected = t
 	if run {
 		b.start(t)
@@ -303,6 +330,11 @@ const (
 		"the risks, and any questions you need answered first. Your reply is the plan; it is reviewed before you implement it."
 	reviseNote    = "\n\n---\nRevise the plan with this. Still change no files; reply with the whole revised plan."
 	implementNote = "The plan is approved: implement it now, then verify the change and report what you did."
+	leadNote      = "\n\n---\nYou lead this task, with other agents. Split the work into parts that can go on in parallel, " +
+		"and file each as a subtask with the kanban MCP server's create_todo tool (subtask: true; read_only: true for research that changes no files, " +
+		"so its agent reports what it found). Each starts right away, on a branch of your branch's last commit, so commit what a subtask needs first. " +
+		"Work on your own part meanwhile. Wait for each with wait_todo and read its report; use message_todo to steer one while it works, or to ask it for more after. " +
+		"Merge each subtask's branch into yours with git merge, resolve conflicts, check that it all works together, and report what each agent did."
 )
 
 // turnOpts says what kind of turn to run.
@@ -314,7 +346,8 @@ type turnOpts struct {
 	// reviewer runs a read-only review turn by that agent, in a conversation
 	// of its own, instead of a turn of the task's agent.
 	reviewer string
-	revision bool // the task's agent answers a review: the loop goes on after it
+	revision bool   // the task's agent answers a review: the loop goes on after it
+	kind     string // the turn's label, when not the usual
 }
 
 // start runs a task's prompt in a new conversation: its first turn, or a
@@ -332,25 +365,94 @@ func (b *board) start(t *Task) {
 		t.addLog("── given to " + a)
 	}
 	prompt := t.Prompt
+	if t.Lead {
+		prompt += leadNote
+	}
 	if t.PlanFirst {
 		prompt += planNote
 	}
 	b.turn(t, prompt, turnOpts{fresh: t.Runs > 0, plan: t.PlanFirst})
 }
 
-// reply continues the task's conversation with a message: a revision of
-// the plan while it waits at Confirm, else of the work.
+// reply sends what you wrote in the detail panel.
 func (b *board) reply(t *Task, message string) {
-	if message = strings.TrimSpace(message); message == "" || t.SessionRef == "" {
+	if strings.TrimSpace(message) == "" {
 		return
 	}
 	t.draft = ""
+	b.say(t, message, "")
+}
+
+// How a message reached a task's agent.
+const (
+	saidLive  = "live"  // it reads it at its next step
+	saidLater = "later" // its next turn, after the one running
+	saidTurn  = "turn"  // a turn of its own, now
+)
+
+// say gives a task's agent a message: while it works, at its next step if
+// it takes messages then, else in a turn after the one running; while it
+// waits, in a turn that continues its conversation: a revision of the plan
+// while it waits at Confirm, else of the work. from names who says it, an
+// agent; "" for you.
+func (b *board) say(t *Task, message, from string) string {
+	if message = strings.TrimSpace(message); message == "" {
+		return ""
+	}
+	shown := message
+	if from != "" {
+		shown = from + ": " + message
+	}
+	if _, running := b.runs[t.ID]; running || t.Status == Queued {
+		if ch := b.inboxes[t.ID]; ch != nil {
+			select {
+			case ch <- message:
+				t.addLog("› " + shown)
+				b.save()
+				return saidLive
+			default:
+			}
+		}
+		t.Asides = append(t.Asides, message)
+		t.addLog("› " + shown + "  (after this turn)")
+		b.save()
+		return saidLater
+	}
+	if t.SessionRef == "" {
+		return ""
+	}
 	plan := t.Status == Confirm || (t.Status == Failed && t.Stage == "plan")
 	prompt := message
+	if len(t.Asides) > 0 { // what it has not had yet comes first
+		prompt = strings.Join(append(t.Asides, message), "\n\n")
+		t.Asides = nil
+	}
 	if plan {
 		prompt += reviseNote
 	}
-	b.turn(t, prompt, turnOpts{resume: true, plan: plan, said: message})
+	b.turn(t, prompt, turnOpts{resume: true, plan: plan, said: shown})
+	return saidTurn
+}
+
+// sendAsides gives the agent the messages that came while its turn ran, in
+// a turn of their own, once the task has come to rest where a reply goes.
+func (b *board) sendAsides(t *Task) bool {
+	if len(t.Asides) == 0 || started(t) || t.SessionRef == "" || (t.Status != Review && t.Status != Confirm) {
+		return false
+	}
+	msgs := t.Asides
+	t.Asides = nil
+	text := strings.Join(msgs, "\n\n")
+	if len(msgs) > 1 {
+		text = "Messages that came while you worked:\n\n" + text
+	}
+	plan := t.Status == Confirm
+	prompt := text
+	if plan {
+		prompt += reviseNote
+	}
+	b.turn(t, prompt, turnOpts{resume: true, plan: plan, kind: "messages"})
+	return started(t)
 }
 
 // confirm approves the plan: the agent builds it, in the same conversation,
@@ -442,7 +544,7 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 		b.save()
 		return
 	}
-	if len(b.runs) >= b.maxRunning() {
+	if len(b.runs) >= b.maxRunning() && !t.Sub { // ponytail: a subtask runs past the limit, as the task waiting on it holds a slot
 		t.QueuedFrom, t.Status, t.pending = t.Status, Queued, &queuedTurn{prompt, o}
 		b.queue = append(b.queue, t)
 		t.addLog(fmt.Sprintf("── queued: %d agents are running, the most at once", len(b.runs)))
@@ -467,7 +569,7 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 		w := *t.WS
 		ws = &w
 	}
-	t.Status, t.Err = Running, ""
+	t.Status, t.Err, t.Note = Running, "", ""
 	if o.reviewer == "" {
 		t.Merged = false // new work is not merged yet
 		t.Question = nil // a turn of its agent answers it, or moves past it
@@ -494,12 +596,21 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 	case o.plan:
 		kind = "plan"
 	}
+	if o.kind != "" {
+		kind = o.kind
+	}
 	t.addLog(fmt.Sprintf("── %s · %s%s · %s", kind, agent, modelSuffix(model), time.Now().Format("15:04:05")))
-	t.doing = kind
+	t.Doing = kind
+	if o.reviewer == "" { // what the turn does, should the app quit under it
+		t.Stage = "build"
+		if o.plan {
+			t.Stage = "plan"
+		}
+	}
 	if o.said != "" {
 		t.addLog("› " + o.said)
 	}
-	readOnly := o.plan || o.reviewer != ""
+	readOnly := o.plan || o.reviewer != "" || t.ReadOnly
 	if readOnly && t.WS == nil && b.inPlace(t) {
 		t.addLog("note: outside git, nothing undoes edits the agent makes anyway")
 	}
@@ -513,6 +624,10 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 		}
 	}
 	b.save()
+	if liveAgents[agent] && o.reviewer == "" {
+		ch := make(chan string, 32)
+		b.inboxes[t.ID], task.inbox = ch, ch
+	}
 	closeBridge := func() {}
 	if b.bridge != nil {
 		task.mcpURL, closeBridge = b.bridge.open(t, o.reviewer != "")
@@ -578,6 +693,7 @@ func (b *board) workspace(ws *Workspace, task Task, log emit) (*Workspace, error
 				t.WS = &w
 			}
 		}
+		b.save() // should the app quit during the turn, its resume works here
 	})
 	return ws, nil
 }
@@ -681,6 +797,19 @@ func (b *board) finish(t *Task, r result, err error, took time.Duration, before 
 		cancel()
 		delete(b.runs, t.ID)
 	}
+	t.Asides = append(r.Unsent, t.Asides...) // what the agent never got waits for its next turn
+	if ch := b.inboxes[t.ID]; ch != nil {
+		delete(b.inboxes, t.ID)
+	drain:
+		for {
+			select {
+			case msg := <-ch:
+				t.Asides = append(t.Asides, msg)
+			default:
+				break drain
+			}
+		}
+	}
 	switch {
 	case g.err != nil && (o.plan || o.reviewer != ""):
 		t.addLog("✗ undoing the read-only turn's edits: " + g.err.Error())
@@ -698,6 +827,9 @@ func (b *board) finish(t *Task, r result, err error, took time.Duration, before 
 	}
 	if o.reviewer != "" {
 		b.finishReview(t, r, err, before, o.reviewer)
+		if !isStopped(err) && !b.sendAsides(t) {
+			b.settled(t)
+		}
 		b.save()
 		return
 	}
@@ -742,6 +874,9 @@ func (b *board) finish(t *Task, r result, err error, took time.Duration, before 
 	if !started(t) {
 		t.picked = false // its agent is free again
 	}
+	if !stopped && !b.sendAsides(t) {
+		b.settled(t)
+	}
 	b.save()
 }
 
@@ -764,6 +899,50 @@ func (b *board) stopAll() {
 	case <-done:
 	case <-time.After(3 * time.Second):
 	}
+}
+
+// After the app quit under a turn: the agent's conversation is resumed once
+// the board is up, in the same worktree, where what it did is still there.
+const (
+	resumedKind = "resumed"
+	resumeNote  = "The board's app restarted while you were working, which stopped your last turn midway. " +
+		"Continue the task from where you left off: first check what is already done, then finish the rest and report what you did."
+	resumePlanNote = "\n\nYou were planning: still change no files, and reply with the whole plan."
+)
+
+// quitUnder sorts a task whose turn the app quit under, as the board loads.
+// Its agent's conversation is resumed, unless it has none or the turn was
+// itself a resume; an AI review goes back to its gate.
+func (b *board) quitUnder(t *Task) {
+	gate := Review
+	if t.Stage == "plan" && len(t.Plans) > 0 {
+		gate = Confirm
+	}
+	switch {
+	case strings.HasPrefix(t.Doing, "review"):
+		t.Status = gate
+		t.addLog("── the AI review stopped: the app quit")
+	case t.SessionRef != "" && t.Doing != resumedKind:
+		t.Status = gate // where it rests should the resume be stopped
+		b.interrupted = append(b.interrupted, t)
+	default:
+		t.Status, t.Err = Failed, "interrupted: the app quit while it ran"
+	}
+}
+
+// resumeInterrupted resumes the turns the app quit under. It runs once the
+// board can run turns.
+func (b *board) resumeInterrupted() {
+	for _, t := range b.interrupted {
+		plan := t.Stage == "plan"
+		prompt := resumeNote
+		if plan {
+			prompt += resumePlanNote
+		}
+		t.addLog("── the app quit during this task's turn: resuming it")
+		b.turn(t, prompt, turnOpts{resume: true, plan: plan, kind: resumedKind})
+	}
+	b.interrupted = nil
 }
 
 // handoff is how agents collaborate: another agent picks up the task in the
@@ -946,6 +1125,24 @@ func main() {
 			Content:        ui.View(b.view),
 		})
 		b.update = win.Update
+		b.focused, b.badge = win.IsFocused, mygo.App.SetBadgeCount
+		b.notify = func(n notice) {
+			if !mygo.NotificationsSupported() { // `go run .`: only the packaged app can
+				return
+			}
+			nt := mygo.NewNotification(mygo.NotificationOptions{ID: noticeID(n.ID), Title: n.Title, Subtitle: n.Subtitle, Body: n.Body})
+			go func() {
+				if err := nt.Show(); err != nil {
+					log.Printf("notification: %v", err)
+				}
+			}()
+		}
+		mygo.App.OnNotificationClick(func(id string) {
+			win.Update(func() { b.openNotice(id) })
+			win.Show()
+			win.Focus()
+		})
+		b.resumeInterrupted()
 		go b.watchQuotas(win.Update)
 		go func() { // watch the agents run outside the board
 			w := newWatcher()
