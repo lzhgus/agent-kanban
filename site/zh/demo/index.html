@@ -186,10 +186,10 @@ a{color:inherit}
             <div class="label">AGENTS</div>
             <div class="agentrow active"><div class="r1"><span style="font-family:monospace">|▎</span> All agents <span>6</span></div><div class="tok" id="allTok">128.0k tokens</div></div>
             <div class="agentrow" id="rowClaude"><div class="r1"><span class="adot" style="background:var(--claude)"></span> claude <span>3</span></div><div class="tok" id="claudeTok">64.0k tokens</div><div class="meter"><i style="width:42%"></i></div></div>
-            <div class="agentrow"><div class="r1"><span class="adot" style="background:var(--codex)"></span> codex <span>2</span></div><div class="tok">38.5k tokens</div><div class="meter"><i style="width:28%"></i></div></div>
+            <div class="agentrow"><div class="r1"><span class="adot" style="background:var(--codex)"></span> codex <span>只读</span></div><div class="tok">38.5k tokens</div><div class="meter"><i style="width:28%"></i></div></div>
             <div class="agentrow"><div class="r1"><span class="adot" style="background:var(--anti)"></span> antigravity <span>1</span></div><div class="tok">16.2k tokens</div><div class="meter"><i style="width:18%"></i></div></div>
             <div class="agentrow"><div class="r1"><span class="adot" style="background:var(--copilot)"></span> copilot <span>0</span></div><div class="tok">9.3k tokens</div></div>
-            <div class="sidefoot"><span style="color:#5da13a">●</span> Watching Claude Code, Codex &amp; Antigravity<br><br>Agents at once &nbsp;<b style="color:#171917">3</b></div>
+            <div class="sidefoot"><span style="color:#5da13a">●</span> Claude Code 运行任务<br><span style="color:var(--codex)">●</span> Codex 会话：只读<br><br>Agents at once &nbsp;<b style="color:#171917">3</b></div>
           </aside>
 
           <!-- Main -->
@@ -218,14 +218,14 @@ a{color:inherit}
                 <div class="colhead"><span class="cdot" style="background:#c4900a"></span> Review <span class="cnt" id="cntReview">2</span></div>
                 <div id="reviewSlot"></div>
                 <div class="card"><div class="who"><span style="color:var(--copilot)">● copilot</span><time>6m</time></div><h4>Write API docs</h4><div class="meta">◉ docs-site · 12.0k tok</div></div>
-                <div class="card"><div class="who"><span style="color:var(--codex)">● codex</span><time>12m</time></div><h4>Refactor auth utils</h4><div class="meta">◉ demo-app · 21.5k tok</div></div>
+                <div class="card"><div class="who"><span style="color:var(--claude)">● claude</span><time>12m</time></div><h4>Refactor auth utils</h4><div class="meta">◉ demo-app · 21.5k tok</div></div>
               </div>
 
               <div class="col" id="colDone">
                 <div class="colhead"><span class="cdot" style="background:#8a8c86"></span> Done <span class="cnt" id="cntDone">3</span></div>
                 <div id="doneSlot"></div>
                 <div class="card"><div class="who"><span style="color:var(--claude)">● claude</span><time>1h</time></div><h4>Fix login redirect</h4><div class="meta">◉ demo-app · 9.8k tok</div></div>
-                <div class="card"><div class="who"><span style="color:var(--codex)">● codex</span><time>2h</time></div><h4>Add search filter</h4><div class="meta">◉ demo-app · 14.2k tok</div></div>
+                <div class="card"><div class="who"><span style="color:var(--codex)">● codex</span><time>2h</time></div><h4>终端会话（只读查看）</h4><div class="meta">◉ demo-app · 14.2k tok <span class="pill blue">只读</span></div></div>
                 <div class="card"><div class="who"><span style="color:var(--copilot)">● copilot</span><time>3h</time></div><h4>Update README badges</h4><div class="meta">◉ docs-site · 3.6k tok</div></div>
               </div>
             </div>
@@ -242,8 +242,8 @@ a{color:inherit}
             <div>
               <div class="kicker">Agent Kanban — Open Source</div>
               <h2>一个看板<br>管所有 <em>coding agent</em></h2>
-              <p>Claude Code · Codex · Copilot · Antigravity —— 不再开一堆终端来回切。</p>
-              <div class="agentpills"><span><i class="adot" style="background:var(--claude)"></i>claude</span><span><i class="adot" style="background:var(--codex)"></i>codex</span><span><i class="adot" style="background:var(--anti)"></i>antigravity</span><span><i class="adot" style="background:var(--copilot)"></i>copilot</span></div>
+              <p>Claude Code · Copilot CLI · Antigravity，外加只读查看 Codex 会话 —— 不再开一堆终端来回切。</p>
+              <div class="agentpills"><span><i class="adot" style="background:var(--claude)"></i>claude</span><span><i class="adot" style="background:var(--codex)"></i>codex · 只读</span><span><i class="adot" style="background:var(--anti)"></i>antigravity</span><span><i class="adot" style="background:var(--copilot)"></i>copilot</span></div>
             </div>
           </div>
 
@@ -290,9 +290,9 @@ a{color:inherit}
     <div class="stamp"><div class="t">00:00 — 00:03</div><b>钩子</b><p>先讲清卖点：不用再盯着多个终端，一个看板全管。</p></div>
     <div class="stamp"><div class="t">00:03 — 00:08</div><b>新建任务</b><p>点 New task，输入 “Add dark mode toggle”，指定 agent 与独立分支。</p></div>
     <div class="stamp"><div class="t">00:08 — 00:14</div><b>接单执行</b><p>claude 接单进 Running，步骤逐项完成，进度与 token 实时上涨。</p></div>
-    <div class="stamp"><div class="t">00:14 — 00:20</div><b>Review &amp; Merge</b><p>codex 交叉 review，LGTM 后进 Done 并 merge 到 main，收尾放仓库链接。</p></div>
+    <div class="stamp"><div class="t">00:14 — 00:20</div><b>Review &amp; Merge</b><p>另一个 Claude Code 会话做 review，LGTM 后进 Done 并 merge 到 main，收尾放仓库链接。</p></div>
   </div>
-  <p class="note">说明：本页是代码渲染的合成演示（不是录屏）。出镜任务 “Add dark mode toggle / Fix login redirect / Write API docs”、工作区 “demo-app / docs-site”、分支 “feat/dark-mode” 与全部 token 数字均为虚构的圆整 mock 值，与真实使用记录无关。</p>
+  <p class="note">说明：本页是代码渲染的合成演示（不是录屏）。出镜任务 “Add dark mode toggle / Fix login redirect / Write API docs”、工作区 “demo-app / docs-site”、分支 “feat/dark-mode” 与全部 token 数字均为虚构的圆整 mock 值，与真实使用记录无关。演示中只有 Claude Code 执行和 review 任务；Codex 只作为只读查看的终端会话出现。</p>
 </div>
 
 <!-- Hero card node created once -->
@@ -312,7 +312,7 @@ a{color:inherit}
       </div>
     </div>
     <div class="reviewbox" id="reviewBox">
-      <div style="font-size:11px;font-weight:800;letter-spacing:.06em;color:#7a7d78">REVIEW BY CODEX</div>
+      <div style="font-size:11px;font-weight:800;letter-spacing:.06em;color:#7a7d78">REVIEW BY CLAUDE</div>
       <div class="rv">✅ Tests pass &nbsp;·&nbsp; ✅ No conflicts</div>
       <div class="rv" id="lgtmLine" style="opacity:.25">💬 “LGTM — clean diff, ship it.”</div>
     </div>
@@ -382,13 +382,13 @@ a{color:inherit}
       lastPhase=phase;
       var info=[
         '<b>01 / HOOK</b> &nbsp;一个看板管所有 coding agent','<b>02 / NEW TASK</b> &nbsp;新建任务 → To Do',
-        '<b>03 / RUNNING</b> &nbsp;Agent 接单 · 进度 + Token','<b>04 / REVIEW → DONE</b> &nbsp;交叉 Review · Merge'][phase];
+        '<b>03 / RUNNING</b> &nbsp;Agent 接单 · 进度 + Token','<b>04 / REVIEW → DONE</b> &nbsp;Claude Code Review · Merge'][phase];
       els.pill.innerHTML=info;
       els.caption.innerHTML=[
         '一个看板，管所有 <b>coding agent</b>',
         '新建任务 → 进入 <b>To Do</b>',
         '<b>claude</b> 接单中 — 进度与 token 实时上涨',
-        '<b>codex</b> review 通过 → <b>Done</b> 并 merge'][phase];
+        '另一个 <b>Claude Code</b> review 通过 → <b>Done</b> 并 merge'][phase];
       [els.colTodo,els.colRun,els.colReview,els.colDone].forEach(function(c){c.classList.remove('highlight')});
       if(phase===1) els.colTodo.classList.add('highlight');
       if(phase===2) els.colRun.classList.add('highlight');
@@ -442,7 +442,7 @@ a{color:inherit}
       flipTo('review'); els.cntRun.textContent='1'; els.runEmpty.style.display='none'; els.cntReview.textContent='3';
       els.runStatus.textContent='1 running · 3 need you'; els.heroBar.style.width='100%'; els.pct.textContent='100%'; els.heroTok.textContent='42.0k tok'; els.claudeTok.textContent='106.0k tokens'; els.allTok.textContent='170.0k tokens';
       els.statePill.textContent='In Review'; els.reviewBox.classList.add('show'); els.lgtm.style.opacity= s>=15.6?1:.25;
-      els.heroWho.innerHTML='● codex <span style="color:#8a8c86;font-weight:500">reviewing</span>'; els.heroWho.style.color='var(--codex)';
+      els.heroWho.innerHTML='● claude <span style="color:#8a8c86;font-weight:500">reviewer</span>'; els.heroWho.style.color='var(--claude)';
     }
     // Done + merge 17.6-20
     if(s>=17.6){
