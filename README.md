@@ -79,6 +79,9 @@ go run github.com/egoist/mygo/cmd/mygo build -skip-dmg
 cp -R "build/darwin-arm64/Agent Kanban.app" /Applications/
 ```
 
+The app icon is `assets/icon.png` (set as `icon` in `mygo.json`); replace that
+file, or point `icon` at `assets/icon-alt-cream.png`, and rebuild to swap it.
+
 Opened from Finder, it reads your login shell's `PATH` to find the agent
 CLIs. The app and `go run .` share the same board.
 
