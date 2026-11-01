@@ -1,8 +1,8 @@
-module agent-kanban
+module github.com/lzhgus/agent-kanban
 
 go 1.27.3
 
-require github.com/egoist/mygo v0.7.2-0.20261027060310-8e7c49cf1c9e
+require github.com/egoist/mygo v0.7.4
 
 require (
 	github.com/ebitengine/purego v0.11.1 // indirect

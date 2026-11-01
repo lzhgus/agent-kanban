@@ -1,0 +1,109 @@
+# Agent Kanban
+
+**One board for the coding agents you already use.**
+
+Agent Kanban is a desktop app that runs Claude Code, GitHub Copilot CLI and
+Antigravity as tasks on a kanban board. Each task works on its own git
+branch. Agents can plan before they build, review each other's work, ask you
+questions and file tasks for one another, and you see every agent's progress,
+token usage and plan quota in one place.
+
+It drives the CLIs you have installed and signed in to, so it uses your
+existing subscriptions: no API keys, no account, no server. Everything runs on
+your machine.
+
+> **Status: early.** It works day to day with Claude Code. GitHub Copilot CLI
+> and Antigravity support is implemented and being tested. Expect rough edges.
+
+## What it does
+
+- **Tasks are conversations.** Start a task, then reply to it to ask for
+  changes: the agent picks up where it stopped, in the same session.
+- **A branch per task.** In a git repository, every task works in its own
+  worktree on a `kanban/<id>-<title>` branch, so agents never touch your
+  checkout or each other's files. Each turn ends in a commit, the Changes tab
+  shows the diff, and **Merge** brings it into your branch when you are ready.
+- **Plan first.** A task can start with a read-only planning turn. The plan
+  waits for you to confirm or revise it before any code changes.
+- **AI review.** At a plan or at finished changes, have another agent review.
+  The task's agent revises, and the loop runs until the reviewer approves or
+  the rounds you chose run out. The decision stays yours.
+- **Agents work together.** A built-in MCP server lets agents ask you a
+  question (`ask_user`), file tasks for other agents (`create_todo`), and read
+  the board (`list_todos`, `get_todo`).
+- **Usage at a glance.** Tokens and cost per task and per agent, and each
+  agent's plan windows (Claude's 5-hour and weekly limits, Copilot's premium
+  requests, and so on) with when they reset.
+- **Queue.** Choose how many agents run at once; the rest wait their turn.
+- **Sessions outside the board.** Claude Code and Codex sessions you run in a
+  terminal show up on the board too, read-only, with their token usage.
+
+## Supported agents
+
+| Agent | Run tasks | Board tools (MCP) | Quota |
+|---|---|---|---|
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | ✅ | ✅ | ✅ |
+| [GitHub Copilot CLI](https://github.com/github/copilot-cli) | 🧪 | 🧪 | 🧪 |
+| Antigravity CLI (`agy`) | 🧪 | — | 🧪 |
+| [Codex](https://github.com/openai/codex) | watched read-only | — | ✅ |
+
+✅ tested · 🧪 implemented, being tested
+
+## Getting started
+
+You need macOS, [Go](https://go.dev/dl/) 1.27.3 or newer, git, and at least
+one of the agent CLIs above, installed and signed in.
+
+```sh
+git clone https://github.com/lzhgus/agent-kanban.git
+cd agent-kanban
+go run .
+```
+
+Click **New task**, describe what to do, pick an agent and a folder, and press
+**Add & Run**. Tick **Plan first** to review a plan before the agent changes
+anything.
+
+Linux should work but is untested. Windows is not supported yet.
+
+## How a task flows
+
+```
+To Do ─▶ Running ─▶ Review ─▶ Done
+To Do ─▶ Running (plan) ─▶ Confirm ─▶ Running ─▶ Review ─▶ Done    with Plan first
+```
+
+- **To Do**: filed, not started.
+- **Running**: an agent is working (or **Queued**, waiting for a free slot).
+- **Confirm**: a plan, or an agent's question, waits for you.
+- **Review**: the turn is done; reply, review, merge, or hand it off.
+- **Done**: finished. Agents' sessions you run outside the board move here
+  after two idle hours.
+
+## Good to know
+
+- **Agents run unattended.** Each agent runs headless with its permission
+  prompts turned off, inside the task's worktree (or the folder itself when
+  it is not a git repository). Only point it at code you trust them with.
+- **Planning and reviewing are read-only.** Whatever a planning or review turn
+  leaves behind is reset when it ends.
+- **The MCP server is local.** It listens on `127.0.0.1` only, and each turn
+  gets its own URL that stops working when the turn ends.
+- **Where things live.** The board is saved in
+  `~/Library/Application Support/agent-kanban/board.json`, worktrees next to
+  it in `worktrees/`. Deleting a task removes its worktree but keeps its
+  branch in your repository.
+
+## Development
+
+```sh
+go test ./...
+go vet ./...
+```
+
+Built with [MyGo](https://github.com/egoist/mygo), which draws the native UI
+in pure Go.
+
+## License
+
+[MIT](LICENSE)
