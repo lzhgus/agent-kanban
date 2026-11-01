@@ -60,7 +60,7 @@ type Task struct {
 	// The agent's conversation, resumed by each reply: a Claude Code session
 	// id, an Antigravity conversation id or a Copilot session id.
 	SessionRef string
-	// Claude Code sessions of the task, which the watcher leaves to it.
+	// The agents' conversations of the task, which the watcher leaves to it.
 	SessionIDs []string
 	// The task's worktree and branch; nil when its folder is not in git and
 	// the agent works there in place.
@@ -662,6 +662,9 @@ func (b *board) finish(t *Task, r result, err error, took time.Duration, before 
 		t.addLog(fmt.Sprintf("note: the read-only turn changed %d files; they were put back", g.discarded))
 	}
 	t.Duration += took
+	if r.SessionRef != "" && !slices.Contains(t.SessionIDs, r.SessionRef) {
+		t.SessionIDs = append(t.SessionIDs, r.SessionRef) // the watcher leaves it to the task
+	}
 	if o.reviewer != "" {
 		b.finishReview(t, r, err, before, o.reviewer)
 		b.save()
@@ -776,7 +779,10 @@ func (b *board) move(t *Task, to Status) {
 	b.save()
 }
 
-// setSessions takes a scan from the watcher, leaving out the board's own runs.
+// setSessions takes a scan from the watcher, leaving out the board's own
+// runs: the conversations its tasks hold, and any in its worktrees, where an
+// agent that names its conversation only when the turn ends works meanwhile.
+// ponytail: a task run in place outside git shows for its first turn only.
 func (b *board) setSessions(all []*Session) {
 	ours := map[string]bool{}
 	for _, t := range b.Tasks {
@@ -784,7 +790,11 @@ func (b *board) setSessions(all []*Session) {
 			ours[id] = true
 		}
 	}
-	b.sessions = slices.DeleteFunc(all, func(s *Session) bool { return s.Agent == "claude" && ours[s.ID] })
+	inWorktrees := func(dir string) bool {
+		rel, err := filepath.Rel(b.worktrees, dir)
+		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	}
+	b.sessions = slices.DeleteFunc(all, func(s *Session) bool { return ours[s.ID] || inWorktrees(s.Dir) })
 }
 
 type placement struct {

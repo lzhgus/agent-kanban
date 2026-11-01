@@ -8,6 +8,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -251,7 +252,6 @@ func parseAgyUsage(out []byte) (*Quota, error) {
 						ID        string   `json:"id"`
 						Disabled  bool     `json:"disabled"`
 						Remaining *float64 `json:"remaining_fraction"`
-						Window    string   `json:"window"`
 						Reset     string   `json:"reset_time"`
 					} `json:"buckets"`
 				} `json:"groups"`
@@ -261,21 +261,26 @@ func parseAgyUsage(out []byte) (*Quota, error) {
 	if err := json.NewDecoder(strings.NewReader(string(out[start:]))).Decode(&r); err != nil {
 		return nil, err
 	}
+	// A group's buckets, one per model, share pools: like agy, show the one
+	// closest to its limit. A reset agy does not know is the Unix epoch.
 	q := &Quota{At: time.Now()}
 	for _, g := range r.Command.Data.Groups {
+		var w *Window
 		for _, bk := range g.Buckets {
 			if bk.ID == "" || bk.Disabled || bk.Remaining == nil {
 				continue
 			}
-			label := g.Name
-			if label == "" {
-				label = bk.ID
+			used := pct((1 - *bk.Remaining) * 100)
+			if w == nil || used > w.Used {
+				reset, _ := time.Parse(time.RFC3339, bk.Reset)
+				if reset.Unix() <= 0 {
+					reset = time.Time{}
+				}
+				w = &Window{Label: cmp.Or(g.Name, bk.ID), Used: used, ResetsAt: reset}
 			}
-			if bk.Window == "weekly" {
-				label += " week"
-			}
-			reset, _ := time.Parse(time.RFC3339, bk.Reset)
-			q.Windows = append(q.Windows, Window{Label: label, Used: pct((1 - *bk.Remaining) * 100), ResetsAt: reset})
+		}
+		if w != nil {
+			q.Windows = append(q.Windows, *w)
 		}
 	}
 	return q, nil

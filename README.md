@@ -40,8 +40,9 @@ your machine.
   tasks first come, first served, one at a time each; a task for any agent
   goes to the free one with the most quota left. Tasks an agent filed
   always plan first and wait for you to confirm.
-- **Sessions outside the board.** Claude Code and Codex sessions you run in a
-  terminal show up on the board too, read-only, with their token usage.
+- **Sessions outside the board.** Claude Code, Codex and Antigravity sessions
+  you run in a terminal show up on the board too, read-only, with their token
+  usage where the agent records it.
 
 ## Supported agents
 

@@ -1,17 +1,21 @@
 package main
 
 // Watching the agents you run outside the board, read-only: the sessions
-// Claude Code writes to ~/.claude/projects/*/<id>.jsonl, and the threads
-// Codex keeps in ~/.codex/state_5.sqlite and thread_history_1.sqlite.
+// Claude Code writes to ~/.claude/projects/*/<id>.jsonl, the threads Codex
+// keeps in ~/.codex/state_5.sqlite and thread_history_1.sqlite, and the
+// conversations Antigravity keeps in ~/.gemini/antigravity-cli.
 // Nothing here starts, stops or writes to them.
 
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,7 +35,7 @@ const (
 
 // Session is an agent conversation started outside the board.
 type Session struct {
-	Agent   string // "claude" or "codex"
+	Agent   string // "claude", "codex" or "antigravity"
 	ID      string
 	Title   string
 	Dir     string
@@ -49,9 +53,11 @@ func (s *Session) key() string { return s.Agent + ":" + s.ID }
 type watcher struct {
 	claudeDir string
 	codexDir  string
+	agyDir    string
 	sqlite    string
 	claude    map[string]*claudeFile // by path
 	codex     map[string]*Session    // by thread id, with its Recent kept between scans
+	lastErr   string                 // the last error logged
 }
 
 func newWatcher() *watcher {
@@ -59,6 +65,7 @@ func newWatcher() *watcher {
 	w := &watcher{
 		claudeDir: filepath.Join(home, ".claude", "projects"),
 		codexDir:  filepath.Join(home, ".codex"),
+		agyDir:    filepath.Join(home, ".gemini", "antigravity-cli"),
 		claude:    map[string]*claudeFile{},
 		codex:     map[string]*Session{},
 	}
@@ -76,10 +83,16 @@ func (w *watcher) scan(now time.Time) []*Session {
 	var out []*Session
 	out = append(out, w.scanClaude(now)...)
 	codex, err := w.scanCodex(now)
-	if err != nil {
-		log.Printf("watching codex: %v", err)
-	}
 	out = append(out, codex...)
+	agy, agyErr := w.scanAgy(now)
+	out = append(out, agy...)
+	err = errors.Join(err, agyErr)
+	if msg := fmt.Sprint(err); err != nil && msg != w.lastErr { // once, not every scan
+		log.Printf("watching: %v", err)
+		w.lastErr = msg
+	} else if err == nil {
+		w.lastErr = ""
+	}
 	slices.SortFunc(out, func(a, b *Session) int { return b.Updated.Compare(a.Updated) })
 	return out
 }
@@ -257,20 +270,26 @@ func appendRecent(lines []string, line string) []string {
 
 var threadID = regexp.MustCompile(`^[0-9a-fA-F-]{1,64}$`)
 
-// query runs SQL against one of Codex's databases, read-only, and decodes
-// the rows. Codex keeps writing while it runs; WAL lets it read meanwhile.
-func (w *watcher) query(db, sql string, rows any) error {
-	path := filepath.Join(w.codexDir, db)
+// query runs SQL against an agent's database, read-only, and decodes the
+// rows. The agent keeps writing while it runs; WAL lets us read meanwhile.
+func (w *watcher) query(path, sql string, rows any) error {
 	if _, err := os.Stat(path); err != nil {
-		return nil // no Codex here
+		return nil // the agent is not here
 	}
 	if w.sqlite == "" {
 		return fmt.Errorf("sqlite3 not found")
 	}
-	out, err := exec.Command(w.sqlite, "-readonly", "-json", "file:"+path+"?mode=ro", sql).Output()
+	uri := "file:" + path + "?mode=ro"
+	// A WAL database whose agent has closed it has no -wal: a read-only
+	// connection cannot create one and fails to open (14). Nothing writes
+	// then: read the file as it is.
+	if _, err := os.Stat(path + "-wal"); err != nil && walMode(path) {
+		uri += "&immutable=1"
+	}
+	out, err := exec.Command(w.sqlite, "-readonly", "-json", uri, sql).Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
-			return fmt.Errorf("%s: %s", db, strings.TrimSpace(string(ee.Stderr)))
+			return fmt.Errorf("%s: %s", filepath.Base(path), strings.TrimSpace(string(ee.Stderr)))
 		}
 		return err
 	}
@@ -278,6 +297,18 @@ func (w *watcher) query(db, sql string, rows any) error {
 		return nil
 	}
 	return json.Unmarshal(out, rows)
+}
+
+// walMode reads the database header: versions 2 at bytes 18 and 19 are WAL.
+func walMode(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	h := make([]byte, 20)
+	_, err = io.ReadFull(f, h)
+	return err == nil && h[18] == 2
 }
 
 func (w *watcher) scanCodex(now time.Time) ([]*Session, error) {
@@ -291,7 +322,7 @@ func (w *watcher) scanCodex(now time.Time) ([]*Session, error) {
 	}
 	since := now.Add(-recentWindow).UnixMilli()
 	// Subagents' threads (a JSON source) belong to their parent's.
-	err := w.query("state_5.sqlite", fmt.Sprintf(`
+	err := w.query(filepath.Join(w.codexDir, "state_5.sqlite"), fmt.Sprintf(`
 		select id, cwd, coalesce(nullif(name, ''), nullif(title, ''), first_user_message) as title,
 			tokens_used, coalesce(model, '') as model, coalesce(updated_at_ms, updated_at * 1000) as updated
 		from threads
@@ -351,7 +382,7 @@ func (w *watcher) codexDetails(ids []string) error {
 		Kind   string `json:"kind"`
 		Text   string `json:"text"`
 	}
-	err := w.query("thread_history_1.sqlite", `
+	err := w.query(filepath.Join(w.codexDir, "thread_history_1.sqlite"), `
 		select thread_id, 'status' as kind, status as text, 1000000000 as ord from thread_turns t
 		where thread_id in (`+in+`)
 			and rollout_ordinal = (select max(rollout_ordinal) from thread_turns where thread_id = t.thread_id)
@@ -401,4 +432,77 @@ func (w *watcher) codexDetails(ids []string) error {
 		}
 	}
 	return nil
+}
+
+// ── Antigravity ─────────────────────────────────────────────────────────────
+// agy keeps a summary of each conversation in conversation_summaries.db, and
+// the prompts you typed, with their conversation, in history.jsonl.
+
+const agyTime = "2006-01-02 15:04:05.999999999-07:00"
+
+func (w *watcher) scanAgy(now time.Time) ([]*Session, error) {
+	var rows []struct {
+		ID       string `json:"id"`
+		Title    string `json:"title"`
+		Preview  string `json:"preview"`
+		Dirs     string `json:"dirs"`
+		Modified string `json:"modified"`
+		Busy     int    `json:"busy"`
+	}
+	// Subagents' conversations belong to their parent's.
+	err := w.query(filepath.Join(w.agyDir, "conversation_summaries.db"), `
+		select conversation_id as id, title, preview, workspace_uris as dirs, last_modified_time as modified,
+			cast(not_fully_idle as int) * (1 - cast(killed as int)) as busy
+		from conversation_summaries
+		where parent_conversation_id = ''
+		order by last_modified_time desc limit 100`, &rows)
+	if err != nil {
+		return nil, err
+	}
+	prompts := w.agyPrompts()
+	var out []*Session
+	for _, r := range rows {
+		updated, err := time.Parse(agyTime, r.Modified)
+		if err != nil || now.Sub(updated) > recentWindow {
+			continue
+		}
+		s := &Session{Agent: "antigravity", ID: r.ID, Updated: updated, Title: firstLine(cmp.Or(r.Title, r.Preview))}
+		s.Working = r.Busy == 1 && now.Sub(updated) < staleAfter
+		var dirs []string
+		if json.Unmarshal([]byte(r.Dirs), &dirs) == nil && len(dirs) > 0 {
+			if u, err := url.Parse(dirs[0]); err == nil {
+				s.Dir = u.Path
+			}
+		}
+		for _, p := range prompts[r.ID] {
+			s.Recent = appendRecent(s.Recent, "› "+firstLine(p.Display))
+			s.Dir = cmp.Or(s.Dir, p.Workspace)
+		}
+		if s.Title == "" && len(prompts[r.ID]) > 0 {
+			s.Title = firstLine(prompts[r.ID][0].Display)
+		}
+		s.Title = cmp.Or(s.Title, "Antigravity in "+filepath.Base(s.Dir))
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+type agyPrompt struct {
+	Display      string `json:"display"`
+	Workspace    string `json:"workspace"`
+	Conversation string `json:"conversationId"`
+}
+
+// agyPrompts reads history.jsonl, by conversation, oldest first.
+// ponytail: reads the whole file each scan; it is a few KB of prompts.
+func (w *watcher) agyPrompts() map[string][]agyPrompt {
+	data, _ := os.ReadFile(filepath.Join(w.agyDir, "history.jsonl"))
+	by := map[string][]agyPrompt{}
+	for line := range bytes.Lines(data) {
+		var p agyPrompt
+		if json.Unmarshal(line, &p) == nil && p.Conversation != "" && strings.TrimSpace(p.Display) != "" {
+			by[p.Conversation] = append(by[p.Conversation], p)
+		}
+	}
+	return by
 }

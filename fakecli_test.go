@@ -71,7 +71,7 @@ func fakeAgy() {
 	fakeLog("args %s", strings.Join(os.Args[1:], " "))
 	if slices.Contains(os.Args, "/usage") { // the quota probe: noise, then the JSON
 		fmt.Println("Loading…")
-		fmt.Println(`{"command":{"data":{"groups":[{"name":"Gemini Pro","buckets":[{"id":"pro","remaining_fraction":0.25,"window":"weekly","reset_time":"2030-01-02T03:04:05Z"},{"id":"off","disabled":true,"remaining_fraction":0}]}]}}}`)
+		fmt.Println(`{"command":{"data":{"groups":[{"name":"Gemini Pro","buckets":[{"id":"pro","remaining_fraction":0.25,"reset_time":"2030-01-02T03:04:05Z"},{"id":"off","disabled":true,"remaining_fraction":0}]}]}}}`)
 		return
 	}
 	conv := "conv-1"

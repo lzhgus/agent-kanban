@@ -173,7 +173,7 @@ func (b *board) sidebarView(c *ui.Context, p palette) {
 		b.limitRow(c, p)
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(6).Children(func() {
 			statusDot(c, p.brand, true)
-			ui.Text(c, "Watching Claude Code & Codex").FontSize(11).TextColor(p.muted)
+			ui.Text(c, "Watching Claude Code, Codex & Antigravity").FontSize(11).TextColor(p.muted).Wrap().Shrink(1).MinWidth(0)
 		})
 		ui.Text(c, "Outside sessions idle 2 h move to Done.").FontSize(11).TextColor(p.muted).Wrap().Padding(0, 6)
 	})
@@ -588,7 +588,11 @@ func (b *board) sessionCardView(c *ui.Context, p palette, s *Session) {
 		ui.Text(c, s.Title).FontSize(13).FontWeight(600).Wrap().MaxLines(2)
 		ui.Row(c).Gap(5).AlignItems(ui.Center).Tooltip("Started outside the board: watched read-only").Children(func() {
 			ui.Icon(c, iconEye).Size(11, 11).TextColor(p.muted)
-			ui.Text(c, filepath.Base(s.Dir)+" · "+tokens(s.Tokens)+" tok").FontSize(11).Font("monospace").TextColor(p.muted).MaxLines(1).Shrink(1).MinWidth(0)
+			meta := filepath.Base(s.Dir)
+			if s.Tokens > 0 { // Antigravity records none
+				meta += " · " + tokens(s.Tokens) + " tok"
+			}
+			ui.Text(c, meta).FontSize(11).Font("monospace").TextColor(p.muted).MaxLines(1).Shrink(1).MinWidth(0)
 		})
 		if s.Failed != "" {
 			ui.Text(c, s.Failed).FontSize(11).TextColor(p.red)

@@ -36,8 +36,12 @@ func TestParseCopilotAndAgy(t *testing.T) {
 	if err != nil || windows(q) != "Premium=60 Completions=10 " {
 		t.Errorf("copilot %+v %v", q, err)
 	}
-	q, err = parseAgyUsage([]byte("Signing in…\n" + `{"command":{"data":{"groups":[{"name":"Flash","buckets":[{"id":"f","remaining_fraction":0.9,"window":"weekly"}]}]}}}`))
-	if err != nil || windows(q) != "Flash week=10 " {
+	// As agy 1.4 prints it: one group, a bucket per model, no reset known.
+	q, err = parseAgyUsage([]byte("Signing in…\n" + `{"conversation_id":"","status":"SUCCESS","command":{"name":"usage","data":{"groups":[{"name":"All Models","buckets":[` +
+		`{"id":"gemini-4-argon-high","name":"Gemini 4 Argon (High)","remaining_fraction":1,"reset_time":"1970-01-01T00:00:00Z"},` +
+		`{"id":"claude-opus-5-5-max","name":"Claude Opus 5.5 (Max)","remaining_fraction":0.9,"reset_time":"1970-01-01T00:00:00Z"},` +
+		`{"id":"gemini-3-1-pro-low","name":"Gemini 3.1 Pro (Low)","remaining_fraction":0.95,"reset_time":"1970-01-01T00:00:00Z"}]}]}}}`))
+	if err != nil || windows(q) != "All Models=10 " || !q.Windows[0].ResetsAt.IsZero() {
 		t.Errorf("agy %+v %v", q, err)
 	}
 }
@@ -87,7 +91,7 @@ func TestQuotaProbes(t *testing.T) {
 	if q, err := probeCopilot(ctx); err != nil || windows(q) != "Premium=30 " {
 		t.Errorf("copilot %+v %v", q, err)
 	}
-	if q, err := probeAntigravity(ctx); err != nil || windows(q) != "Gemini Pro week=75 " {
+	if q, err := probeAntigravity(ctx); err != nil || windows(q) != "Gemini Pro=75 " {
 		t.Errorf("antigravity %+v %v", q, err)
 	}
 }
