@@ -5,5 +5,10 @@
   "version": "0.1.0",
   "copyright": "© 2026 lzhgus",
   "icon": "assets/icon.png",
-  "out": "build"
+  "out": "build",
+  "macos": {
+    "notarize": {
+      "keychainProfile": "AGENT_KANBAN_NOTARY"
+    }
+  }
 }
