@@ -1,0 +1,7 @@
+# Build output
+/agent-kanban
+/build/
+/dist/
+/.mygo/
+
+.DS_Store

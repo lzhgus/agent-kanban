@@ -1,0 +1,404 @@
+package main
+
+// Watching the agents you run outside the board, read-only: the sessions
+// Claude Code writes to ~/.claude/projects/*/<id>.jsonl, and the threads
+// Codex keeps in ~/.codex/state_5.sqlite and thread_history_1.sqlite.
+// Nothing here starts, stops or writes to them.
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+)
+
+const (
+	recentWindow = 24 * time.Hour   // sessions active in this window are shown
+	staleAfter   = 15 * time.Minute // a turn with no activity for this long is not running
+	idleDone     = 2 * time.Hour    // an ended session idle this long is done, not waiting for you
+	recentLines  = 40
+	scanEvery    = 3 * time.Second
+)
+
+// Session is an agent conversation started outside the board.
+type Session struct {
+	Agent   string // "claude" or "codex"
+	ID      string
+	Title   string
+	Dir     string
+	Model   string
+	Updated time.Time
+	Working bool // a turn is in progress
+	Failed  string
+	Usage   Usage // Claude Code: per kind; Codex reports a total only
+	Tokens  int   // every token, input and output
+	Recent  []string
+}
+
+func (s *Session) key() string { return s.Agent + ":" + s.ID }
+
+type watcher struct {
+	claudeDir string
+	codexDir  string
+	sqlite    string
+	claude    map[string]*claudeFile // by path
+	codex     map[string]*Session    // by thread id, with its Recent kept between scans
+}
+
+func newWatcher() *watcher {
+	home, _ := os.UserHomeDir()
+	w := &watcher{
+		claudeDir: filepath.Join(home, ".claude", "projects"),
+		codexDir:  filepath.Join(home, ".codex"),
+		claude:    map[string]*claudeFile{},
+		codex:     map[string]*Session{},
+	}
+	// The system's sqlite3 first: others on PATH (Android's) may lack -json.
+	if _, err := os.Stat("/usr/bin/sqlite3"); err == nil {
+		w.sqlite = "/usr/bin/sqlite3"
+	} else if p, err := exec.LookPath("sqlite3"); err == nil {
+		w.sqlite = p
+	}
+	return w
+}
+
+// scan returns the sessions active within the window, newest first.
+func (w *watcher) scan(now time.Time) []*Session {
+	var out []*Session
+	out = append(out, w.scanClaude(now)...)
+	codex, err := w.scanCodex(now)
+	if err != nil {
+		log.Printf("watching codex: %v", err)
+	}
+	out = append(out, codex...)
+	slices.SortFunc(out, func(a, b *Session) int { return b.Updated.Compare(a.Updated) })
+	return out
+}
+
+// ── Claude Code ─────────────────────────────────────────────────────────────
+
+type claudeFile struct {
+	offset  int64
+	s       Session
+	prompt  string           // the first prompt, the title until Claude names the session
+	usage   map[string]Usage // by API message id: a message is logged once per content block
+	working bool
+}
+
+func (w *watcher) scanClaude(now time.Time) []*Session {
+	paths, _ := filepath.Glob(filepath.Join(w.claudeDir, "*", "*.jsonl"))
+	var out []*Session
+	for _, p := range paths {
+		fi, err := os.Stat(p)
+		if err != nil || now.Sub(fi.ModTime()) > recentWindow {
+			continue
+		}
+		f := w.claude[p]
+		if f == nil {
+			f = &claudeFile{usage: map[string]Usage{}}
+			f.s.Agent, f.s.ID = "claude", strings.TrimSuffix(filepath.Base(p), ".jsonl")
+			w.claude[p] = f
+		}
+		if fi.Size() < f.offset { // rewritten: start over
+			*f = claudeFile{usage: map[string]Usage{}, s: Session{Agent: "claude", ID: f.s.ID}}
+		}
+		if fi.Size() > f.offset {
+			if err := f.read(p); err != nil {
+				log.Printf("reading %s: %v", p, err)
+			}
+		}
+		if f.s.Dir == "" { // no conversation yet, only metadata
+			continue
+		}
+		s := f.s
+		s.Updated = fi.ModTime()
+		s.Working = f.working && now.Sub(s.Updated) < staleAfter
+		if s.Title == "" {
+			s.Title = firstLine(f.prompt)
+		}
+		if s.Title == "" { // only slash commands so far
+			s.Title = "Claude Code in " + filepath.Base(s.Dir)
+		}
+		s.Recent = slices.Clone(f.s.Recent)
+		out = append(out, &s)
+	}
+	return out
+}
+
+// read consumes the lines appended since the last read; a line still being
+// written waits for the next.
+func (f *claudeFile) read(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if _, err := file.Seek(f.offset, io.SeekStart); err != nil {
+		return err
+	}
+	r := bufio.NewReaderSize(file, 256*1024)
+	for {
+		line, err := r.ReadBytes('\n')
+		if err != nil { // io.EOF: a partial line, read again next time
+			break
+		}
+		f.offset += int64(len(line))
+		f.line(line)
+	}
+	f.s.Usage = Usage{}
+	for _, u := range f.usage {
+		f.s.Usage.add(u)
+	}
+	u := f.s.Usage
+	f.s.Tokens = u.Input + u.CacheRead + u.CacheWrite + u.Output
+	return nil
+}
+
+func (f *claudeFile) line(line []byte) {
+	var e struct {
+		Type        string `json:"type"`
+		AiTitle     string `json:"aiTitle"`
+		Summary     string `json:"summary"`
+		Cwd         string `json:"cwd"`
+		IsSidechain bool   `json:"isSidechain"`
+		Message     struct {
+			ID         string          `json:"id"`
+			Model      string          `json:"model"`
+			StopReason string          `json:"stop_reason"`
+			Content    json.RawMessage `json:"content"`
+			Usage      *struct {
+				Input      int `json:"input_tokens"`
+				Output     int `json:"output_tokens"`
+				CacheRead  int `json:"cache_read_input_tokens"`
+				CacheWrite int `json:"cache_creation_input_tokens"`
+			} `json:"usage"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(line, &e) != nil {
+		return
+	}
+	m := e.Message
+	switch e.Type {
+	case "ai-title":
+		f.s.Title = e.AiTitle
+	case "summary":
+		if f.s.Title == "" {
+			f.s.Title = e.Summary
+		}
+	case "assistant":
+		if u := m.Usage; u != nil && m.ID != "" { // subagents' calls count too
+			f.usage[m.ID] = Usage{Input: u.Input, Output: u.Output, CacheRead: u.CacheRead, CacheWrite: u.CacheWrite}
+		}
+		if e.IsSidechain {
+			return
+		}
+		f.s.Dir, f.s.Model = e.Cwd, m.Model
+		var blocks []struct {
+			Type  string         `json:"type"`
+			Text  string         `json:"text"`
+			Name  string         `json:"name"`
+			Input map[string]any `json:"input"`
+		}
+		_ = json.Unmarshal(m.Content, &blocks)
+		for _, b := range blocks {
+			switch b.Type {
+			case "text":
+				f.recent(b.Text)
+			case "tool_use":
+				f.recent(toolLine(b.Name, b.Input))
+			}
+		}
+		f.working = m.StopReason != "end_turn" && m.StopReason != "stop_sequence"
+	case "user":
+		if e.IsSidechain {
+			return
+		}
+		f.s.Dir = e.Cwd
+		var text string
+		if json.Unmarshal(m.Content, &text) == nil { // a prompt typed by the user
+			if strings.HasPrefix(text, "<") { // a slash command's or hook's wrapper, not a prompt
+				return
+			}
+			if f.prompt == "" {
+				f.prompt = text
+			}
+			f.recent("› " + firstLine(text))
+			f.working = true
+			return
+		}
+		f.working = !bytes.Contains(m.Content, []byte("[Request interrupted by user")) // else a tool's result: the turn goes on
+	}
+}
+
+func (f *claudeFile) recent(line string) {
+	if line = strings.TrimSpace(line); line != "" {
+		f.s.Recent = appendRecent(f.s.Recent, line)
+	}
+}
+
+func appendRecent(lines []string, line string) []string {
+	lines = append(lines, line)
+	if n := len(lines) - recentLines; n > 0 {
+		lines = slices.Delete(lines, 0, n)
+	}
+	return lines
+}
+
+// ── Codex ───────────────────────────────────────────────────────────────────
+
+var threadID = regexp.MustCompile(`^[0-9a-fA-F-]{1,64}$`)
+
+// query runs SQL against one of Codex's databases, read-only, and decodes
+// the rows. Codex keeps writing while it runs; WAL lets it read meanwhile.
+func (w *watcher) query(db, sql string, rows any) error {
+	path := filepath.Join(w.codexDir, db)
+	if _, err := os.Stat(path); err != nil {
+		return nil // no Codex here
+	}
+	if w.sqlite == "" {
+		return fmt.Errorf("sqlite3 not found")
+	}
+	out, err := exec.Command(w.sqlite, "-readonly", "-json", "file:"+path+"?mode=ro", sql).Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("%s: %s", db, strings.TrimSpace(string(ee.Stderr)))
+		}
+		return err
+	}
+	if len(bytes.TrimSpace(out)) == 0 { // no rows
+		return nil
+	}
+	return json.Unmarshal(out, rows)
+}
+
+func (w *watcher) scanCodex(now time.Time) ([]*Session, error) {
+	var threads []struct {
+		ID      string `json:"id"`
+		Cwd     string `json:"cwd"`
+		Title   string `json:"title"`
+		Tokens  int    `json:"tokens_used"`
+		Model   string `json:"model"`
+		Updated int64  `json:"updated"`
+	}
+	since := now.Add(-recentWindow).UnixMilli()
+	// Subagents' threads (a JSON source) belong to their parent's.
+	err := w.query("state_5.sqlite", fmt.Sprintf(`
+		select id, cwd, coalesce(nullif(name, ''), nullif(title, ''), first_user_message) as title,
+			tokens_used, coalesce(model, '') as model, coalesce(updated_at_ms, updated_at * 1000) as updated
+		from threads
+		where archived = 0 and source not like '{%%' and coalesce(updated_at_ms, updated_at * 1000) >= %d
+		order by updated desc limit 100`, since), &threads)
+	if err != nil {
+		return nil, err
+	}
+	var changed []string
+	seen := map[string]bool{}
+	for _, t := range threads {
+		if !threadID.MatchString(t.ID) {
+			continue
+		}
+		seen[t.ID] = true
+		s := w.codex[t.ID]
+		updated := time.UnixMilli(t.Updated)
+		if s == nil || !s.Updated.Equal(updated) {
+			changed = append(changed, t.ID)
+		}
+		if s == nil {
+			s = &Session{Agent: "codex", ID: t.ID}
+			w.codex[t.ID] = s
+		}
+		s.Title, s.Dir, s.Model, s.Tokens, s.Updated = firstLine(t.Title), t.Cwd, t.Model, t.Tokens, updated
+		if s.Title == "" {
+			s.Title = "Codex in " + filepath.Base(t.Cwd)
+		}
+	}
+	for id := range w.codex {
+		if !seen[id] {
+			delete(w.codex, id)
+		}
+	}
+	if len(changed) > 0 {
+		if err := w.codexDetails(changed); err != nil {
+			return nil, err
+		}
+	}
+	var out []*Session
+	for _, t := range threads {
+		if s := w.codex[t.ID]; s != nil {
+			c := *s
+			c.Working = s.Working && now.Sub(s.Updated) < staleAfter
+			c.Recent = slices.Clone(s.Recent)
+			out = append(out, &c)
+		}
+	}
+	return out, nil
+}
+
+// codexDetails reads the threads' last turn status and recent items.
+func (w *watcher) codexDetails(ids []string) error {
+	in := "'" + strings.Join(ids, "','") + "'" // ids matched threadID: no quotes in them
+	var rows []struct {
+		Thread string `json:"thread_id"`
+		Kind   string `json:"kind"`
+		Text   string `json:"text"`
+	}
+	err := w.query("thread_history_1.sqlite", `
+		select thread_id, 'status' as kind, status as text, 1000000000 as ord from thread_turns t
+		where thread_id in (`+in+`)
+			and rollout_ordinal = (select max(rollout_ordinal) from thread_turns where thread_id = t.thread_id)
+		union all
+		select thread_id, item_type, case item_type
+				when 'agentMessage' then substr(json_extract(item_json, '$.text'), 1, 800)
+				when 'userMessage' then substr(json_extract(item_json, '$.content[0].text'), 1, 300)
+				when 'commandExecution' then substr(json_extract(item_json, '$.command'), 1, 300)
+				when 'fileChange' then json_extract(item_json, '$.changes[0].path')
+				when 'mcpToolCall' then json_extract(item_json, '$.server') || '/' || json_extract(item_json, '$.tool')
+			end, ord
+		from (
+			select thread_id, item_type, item_json, rollout_ordinal as ord,
+				row_number() over (partition by thread_id order by rollout_ordinal desc) as rn
+			from thread_items
+			where thread_id in (`+in+`)
+				and item_type in ('agentMessage', 'userMessage', 'commandExecution', 'fileChange', 'mcpToolCall')
+		) where rn <= `+fmt.Sprint(recentLines)+`
+		order by thread_id, ord`, &rows)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		w.codex[id].Recent, w.codex[id].Working, w.codex[id].Failed = nil, false, ""
+	}
+	for _, r := range rows {
+		s := w.codex[r.Thread]
+		if s == nil || strings.TrimSpace(r.Text) == "" {
+			continue
+		}
+		switch r.Kind {
+		case "status":
+			s.Working = r.Text == "inProgress"
+			if r.Text == "failed" {
+				s.Failed = "the last turn failed"
+			}
+		case "agentMessage":
+			s.Recent = appendRecent(s.Recent, strings.TrimSpace(r.Text))
+		case "userMessage":
+			s.Recent = appendRecent(s.Recent, "› "+firstLine(r.Text))
+		case "commandExecution":
+			s.Recent = appendRecent(s.Recent, "▸ Bash "+firstLine(r.Text))
+		case "fileChange":
+			s.Recent = appendRecent(s.Recent, "▸ Edit "+r.Text)
+		case "mcpToolCall":
+			s.Recent = appendRecent(s.Recent, "▸ "+r.Text)
+		}
+	}
+	return nil
+}
