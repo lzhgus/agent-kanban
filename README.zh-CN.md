@@ -8,8 +8,14 @@
   <b>一个看板管所有 coding agent。</b><br>
   <a href="https://agent-kanban.lzhgus.com/zh/">官网</a> ·
   <a href="https://agent-kanban.lzhgus.com/zh/demo/">在线演示</a> ·
+  <a href="#下载">下载</a> ·
   <a href="#开始使用">开始使用</a><br>
   <a href="README.md">English</a> · <b>简体中文</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/lzhgus/agent-kanban/releases/latest"><img src="https://img.shields.io/github/v/release/lzhgus/agent-kanban?label=%E4%B8%8B%E8%BD%BD&logo=apple&color=c8f169" alt="最新版本"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/lzhgus/agent-kanban?color=blue" alt="MIT License"></a>
 </p>
 
 <p align="center">
@@ -30,6 +36,18 @@ Agent Kanban 是一个桌面应用，把 Claude Code、GitHub Copilot CLI 和 An
 
 > **状态：早期版本。** 日常配合 Claude Code 使用没有问题。GitHub Copilot CLI
 > 和 Antigravity 的支持已经实现，正在测试中。难免有粗糙的地方。
+
+## 下载
+
+**[下载最新版本](https://github.com/lzhgus/agent-kanban/releases/latest)**（macOS）：已签名并经 Apple 公证的通用版应用，
+同时支持 Apple Silicon 和 Intel 芯片，需要 macOS 12 或更新版本，大小约 10 MB。
+当前版本是 [`agent-kanban-0.1.0.dmg`](https://github.com/lzhgus/agent-kanban/releases/download/v0.1.0/agent-kanban-0.1.0.dmg)。
+
+1. 打开 DMG，把 **Agent Kanban** 拖进“应用程序”文件夹。
+2. 从“应用程序”、Dock 或 Spotlight 打开。
+
+你仍然需要 git，以及至少一个它支持的 [agent CLI](#支持的-agent)（已安装并登录）。
+除非[从源码构建](#从源码构建)，否则不需要安装 Go。
 
 ## 功能
 
@@ -67,8 +85,15 @@ Agent Kanban 是一个桌面应用，把 Claude Code、GitHub Copilot CLI 和 An
 
 ## 开始使用
 
-你需要 macOS、[Go](https://go.dev/dl/) 1.27.3 或更新版本、git，以及至少一个上面列出的
-agent CLI（已安装并登录）。
+[下载](#下载)并打开应用，点击 **New task**，描述要做什么，选择 agent 和文件夹，
+然后点 **Add & Run**。勾选 **Plan first**，可以在 agent 改动任何东西之前先审阅它的计划。
+
+从 Finder 打开时，它会读取你登录 shell 的 `PATH` 来找到各个 agent CLI。
+
+### 从源码构建
+
+想从源码运行？你需要 macOS、[Go](https://go.dev/dl/) 1.27.3 或更新版本、git，
+以及至少一个上面列出的 agent CLI（已安装并登录）。
 
 ```sh
 git clone https://github.com/lzhgus/agent-kanban.git
@@ -76,12 +101,9 @@ cd agent-kanban
 go run .
 ```
 
-点击 **New task**，描述要做什么，选择 agent 和文件夹，然后点 **Add & Run**。
-勾选 **Plan first**，可以在 agent 改动任何东西之前先审阅它的计划。
-
 ### 构建应用
 
-想把它放进“应用程序”文件夹，从 Dock 或 Spotlight 打开：
+想自己构建应用包、而不是用发布版 DMG：
 
 ```sh
 go run github.com/egoist/mygo/cmd/mygo build -skip-dmg
@@ -91,7 +113,6 @@ cp -R "build/darwin-arm64/Agent Kanban.app" /Applications/
 应用图标是 `assets/icon.png`（在 `mygo.json` 中设为 `icon`）；替换这个文件，
 或把 `icon` 指向 `assets/icon-alt-cream.png`，然后重新构建即可更换。
 
-从 Finder 打开时，它会读取你登录 shell 的 `PATH` 来找到各个 agent CLI。
 应用和 `go run .` 共用同一个看板。
 
 Linux 应该可以运行，但未经测试。暂不支持 Windows。

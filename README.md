@@ -8,8 +8,14 @@
   <b>One board for all your coding agents.</b><br>
   <a href="https://agent-kanban.lzhgus.com">Website</a> ·
   <a href="https://agent-kanban.lzhgus.com/demo/">Live demo</a> ·
+  <a href="#download">Download</a> ·
   <a href="#getting-started">Getting started</a><br>
   <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/lzhgus/agent-kanban/releases/latest"><img src="https://img.shields.io/github/v/release/lzhgus/agent-kanban?label=download&logo=apple&color=c8f169" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/lzhgus/agent-kanban?color=blue" alt="MIT License"></a>
 </p>
 
 <p align="center">
@@ -32,6 +38,20 @@ your machine.
 
 > **Status: early.** It works day to day with Claude Code. GitHub Copilot CLI
 > and Antigravity support is implemented and being tested. Expect rough edges.
+
+## Download
+
+**[Download the latest release](https://github.com/lzhgus/agent-kanban/releases/latest)** for macOS: a signed and
+notarized universal app (Apple Silicon and Intel) for macOS 12 or newer,
+about 10 MB. The current version is
+[`agent-kanban-0.1.0.dmg`](https://github.com/lzhgus/agent-kanban/releases/download/v0.1.0/agent-kanban-0.1.0.dmg).
+
+1. Open the DMG and drag **Agent Kanban** to Applications.
+2. Open it from Applications, the Dock or Spotlight.
+
+You still need git and at least one of the [agent CLIs](#supported-agents)
+it supports, installed and signed in. You don't need Go unless you
+[build from source](#build-from-source).
 
 ## What it does
 
@@ -75,8 +95,18 @@ your machine.
 
 ## Getting started
 
-You need macOS, [Go](https://go.dev/dl/) 1.27.3 or newer, git, and at least
-one of the agent CLIs above, installed and signed in.
+[Download](#download) and open the app, then click **New task**, describe
+what to do, pick an agent and a folder, and press **Add & Run**. Tick
+**Plan first** to review a plan before the agent changes anything.
+
+Opened from Finder, it reads your login shell's `PATH` to find the agent
+CLIs.
+
+### Build from source
+
+Prefer to run it from source? You need macOS, [Go](https://go.dev/dl/)
+1.27.3 or newer, git, and at least one of the agent CLIs above, installed
+and signed in.
 
 ```sh
 git clone https://github.com/lzhgus/agent-kanban.git
@@ -84,13 +114,9 @@ cd agent-kanban
 go run .
 ```
 
-Click **New task**, describe what to do, pick an agent and a folder, and press
-**Add & Run**. Tick **Plan first** to review a plan before the agent changes
-anything.
-
 ### Build the app
 
-To keep it in Applications and open it from the Dock or Spotlight:
+To build your own app bundle instead of using the release DMG:
 
 ```sh
 go run github.com/egoist/mygo/cmd/mygo build -skip-dmg
@@ -100,8 +126,7 @@ cp -R "build/darwin-arm64/Agent Kanban.app" /Applications/
 The app icon is `assets/icon.png` (set as `icon` in `mygo.json`); replace that
 file, or point `icon` at `assets/icon-alt-cream.png`, and rebuild to swap it.
 
-Opened from Finder, it reads your login shell's `PATH` to find the agent
-CLIs. The app and `go run .` share the same board.
+The app and `go run .` share the same board.
 
 Linux should work but is untested. Windows is not supported yet.
 
