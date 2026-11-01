@@ -88,6 +88,13 @@ func TestSessionArgs(t *testing.T) {
 	if a := strings.Join(agyArgs(task), " "); !strings.Contains(a, "--conversation abc") {
 		t.Errorf("agy, reply: %s", a)
 	}
+	if a := strings.Join(claudeArgs(task), " "); strings.Contains(a, "disallowed") {
+		t.Errorf("claude, a building turn denies tools: %s", a)
+	}
+	task.readOnly = true
+	if a := strings.Join(claudeArgs(task), " "); !strings.Contains(a, "--disallowedTools=Write,Edit,NotebookEdit") {
+		t.Errorf("claude, a planning turn: %s", a)
+	}
 }
 
 // The session events `copilot --headless --stdio` sends.

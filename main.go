@@ -23,6 +23,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown"
 )
 
 type Status string
@@ -30,6 +31,7 @@ type Status string
 const (
 	Todo    Status = "To Do"
 	Running Status = "Running"
+	Confirm Status = "Confirm" // a plan waits for you; shown in the Review column
 	Review  Status = "Review"
 	Done    Status = "Done"
 	Failed  Status = "Failed"
@@ -62,10 +64,16 @@ type Task struct {
 	WS      *Workspace
 	Changes Changes // its branch against its base, after the last turn
 	Merged  bool
+	// Plan first: a read-only turn writes a plan, which waits at Confirm
+	// for you before the agent builds it.
+	PlanFirst bool
+	Plans     []string // the plan's versions, the last current
+	Stage     string   // "plan" or "build": what its last turn did
 
-	resume  bool   // this turn continues SessionRef (the drivers' copy only)
-	draft   string // the reply being written in the detail panel
-	merging bool
+	resume   bool   // this turn continues SessionRef (the drivers' copy only)
+	readOnly bool   // this turn may read but not write (the drivers' copy only)
+	draft    string // the reply being written in the detail panel
+	merging  bool
 }
 
 // newUUID returns a random version 4 UUID.
@@ -93,11 +101,14 @@ type board struct {
 	// Watched sessions dragged to a column, by key: the drag holds until the
 	// session goes on.
 	Placed map[string]placement
+	// The new-task form's Plan first, kept for the next task.
+	PlanFirst bool
 
 	path            string
 	worktrees       string // where tasks' worktrees go
 	selected        *Task
-	detailTab       int        // 0 activity, 1 changes
+	tab             string // the detail pane's tab chosen; "" until one is
+	md              markdown.Options
 	diff            *diffPane  // the changes tab's files and diff
 	sessions        []*Session // from the watcher, replaced on each scan
 	selectedSession string     // its key
@@ -176,7 +187,7 @@ func (b *board) add(run bool) {
 		title = firstLine(prompt)
 	}
 	b.NextID++
-	t := &Task{ID: b.NextID, Title: title, Prompt: prompt, Agent: b.agent, Model: strings.TrimSpace(b.model), Dir: expandHome(strings.TrimSpace(b.dir)), Status: Todo}
+	t := &Task{ID: b.NextID, Title: title, Prompt: prompt, Agent: b.agent, Model: strings.TrimSpace(b.model), Dir: expandHome(strings.TrimSpace(b.dir)), Status: Todo, PlanFirst: b.PlanFirst}
 	b.Tasks = append(b.Tasks, t)
 	b.LastDir = t.Dir
 	b.title, b.prompt = "", ""
@@ -188,21 +199,72 @@ func (b *board) add(run bool) {
 	}
 }
 
-// start runs a task's prompt in a new conversation: its first turn, or a
-// start over that leaves the old conversation behind.
-func (b *board) start(t *Task) { b.turn(t, t.Prompt, false) }
+// What the board tells an agent about planning and building.
+const (
+	planNote = "\n\n---\nPlan first. Do not create, edit or delete any files, and do not commit: read what you need, " +
+		"then reply with a plan in Markdown: the approach, the files you will change and how, how you will verify the change, " +
+		"the risks, and any questions you need answered first. Your reply is the plan; it is reviewed before you implement it."
+	reviseNote    = "\n\n---\nRevise the plan with this. Still change no files; reply with the whole revised plan."
+	implementNote = "The plan is approved: implement it now, then verify the change and report what you did."
+)
 
-// reply continues the task's conversation with a message: a revision turn.
+// turnOpts says what kind of turn to run.
+type turnOpts struct {
+	resume bool   // continue the task's conversation
+	fresh  bool   // start over: a new conversation, and a new branch
+	plan   bool   // a read-only planning turn, which ends at Confirm
+	said   string // your words, for the log
+}
+
+// start runs a task's prompt in a new conversation: its first turn, or a
+// start over that leaves the old conversation and branch behind. A task
+// that plans first plans again.
+func (b *board) start(t *Task) {
+	prompt := t.Prompt
+	if t.PlanFirst {
+		prompt += planNote
+	}
+	b.turn(t, prompt, turnOpts{fresh: t.Runs > 0, plan: t.PlanFirst})
+}
+
+// reply continues the task's conversation with a message: a revision of
+// the plan while it waits at Confirm, else of the work.
 func (b *board) reply(t *Task, message string) {
 	if message = strings.TrimSpace(message); message == "" || t.SessionRef == "" {
 		return
 	}
 	t.draft = ""
-	b.turn(t, message, true)
+	plan := t.Status == Confirm || (t.Status == Failed && t.Stage == "plan")
+	prompt := message
+	if plan {
+		prompt += reviseNote
+	}
+	b.turn(t, prompt, turnOpts{resume: true, plan: plan, said: message})
+}
+
+// confirm approves the plan: the agent builds it, in the same conversation,
+// with the reply being written as a note. A conversation that was lost
+// starts anew with the plan in its prompt.
+func (b *board) confirm(t *Task) {
+	if t.Status != Confirm || len(t.Plans) == 0 {
+		return
+	}
+	note := strings.TrimSpace(t.draft)
+	t.draft = ""
+	t.addLog("── plan confirmed")
+	prompt := implementNote
+	if note != "" {
+		prompt += "\n\nA note on it: " + note
+	}
+	if t.SessionRef == "" {
+		b.turn(t, t.Prompt+"\n\n---\nThe approved plan:\n\n"+t.Plans[len(t.Plans)-1]+"\n\n"+prompt, turnOpts{said: note})
+		return
+	}
+	b.turn(t, prompt, turnOpts{resume: true, said: note})
 }
 
 // turn runs one turn of the task's agent on a goroutine of its own.
-func (b *board) turn(t *Task, prompt string, resume bool) {
+func (b *board) turn(t *Task, prompt string, o turnOpts) {
 	if _, running := b.runs[t.ID]; running {
 		return // one turn at a time per conversation
 	}
@@ -221,11 +283,14 @@ func (b *board) turn(t *Task, prompt string, resume bool) {
 	b.runs[t.ID] = cancel
 	before := t.Status
 	var drop *Workspace // a start over forks a new branch; the old one stays
-	if !resume && t.Runs > 0 && t.WS != nil {
+	if o.fresh && t.WS != nil {
 		if !b.shared(t) {
 			drop = t.WS
 		}
 		t.WS, t.Changes, t.Merged = nil, Changes{}, false
+	}
+	if o.fresh {
+		t.Plans = nil
 	}
 	var ws *Workspace
 	if t.WS != nil {
@@ -234,7 +299,7 @@ func (b *board) turn(t *Task, prompt string, resume bool) {
 	}
 	t.Status, t.Err, t.Merged = Running, "", false // new work is not merged yet
 	t.Runs++
-	if !resume { // a new conversation
+	if !o.resume { // a new conversation
 		t.SessionRef = ""
 		if t.Agent == "claude" { // Claude takes the id we give it
 			t.SessionRef = newUUID()
@@ -245,16 +310,22 @@ func (b *board) turn(t *Task, prompt string, resume bool) {
 		t.addLog("")
 	}
 	kind := "turn"
-	if !resume && t.Runs > 1 {
+	switch {
+	case o.fresh:
 		kind = "new conversation"
+	case o.plan:
+		kind = "plan"
 	}
 	t.addLog(fmt.Sprintf("── %s %d · %s%s · %s", kind, t.Runs, t.Agent, modelSuffix(t.Model), time.Now().Format("15:04:05")))
-	if resume {
-		t.addLog("› " + prompt)
+	if o.said != "" {
+		t.addLog("› " + o.said)
+	}
+	if o.plan && t.WS == nil && b.inPlace(t) {
+		t.addLog("note: planning outside git: nothing undoes edits the agent makes anyway")
 	}
 	b.save()
 	task, began := *t, time.Now() // the driver reads a copy, never the board
-	task.Prompt, task.resume = prompt, resume
+	task.Prompt, task.resume, task.readOnly = prompt, o.resume, o.plan
 	b.procs.Add(1)
 	go func() {
 		defer b.procs.Done()
@@ -264,22 +335,27 @@ func (b *board) turn(t *Task, prompt string, resume bool) {
 		}
 		ws, err := b.workspace(ws, task, log)
 		if err != nil {
-			b.update(func() { b.finish(t, result{}, err, time.Since(began), before, resume, turnGit{}) })
+			b.update(func() { b.finish(t, result{}, err, time.Since(began), before, o, turnGit{}) })
 			return
 		}
+		head := ""
 		if ws != nil {
 			task.Dir = ws.Dir()
+			head, _ = git(ws.Worktree, "rev-parse", "HEAD")
 		}
 		r, err := drive(ctx, task, log)
 		if ctx.Err() != nil {
 			err = ctx.Err() // a stopped agent reports its kill ("signal: killed"), not why
 		}
 		var g turnGit
-		if ws != nil { // every turn ends in a commit, stopped and failed ones too
+		switch {
+		case ws != nil && o.plan: // a plan changes nothing: what the agent left goes
+			g.discarded, g.err = ws.discard(head)
+		case ws != nil: // every turn ends in a commit, stopped and failed ones too
 			g.changes, g.err = ws.checkpoint(task.Agent, commitMessage(task, task.Runs))
 			g.ok = true
 		}
-		b.update(func() { b.finish(t, r, err, time.Since(began), before, resume, g) })
+		b.update(func() { b.finish(t, r, err, time.Since(began), before, o, g) })
 	}()
 }
 
@@ -313,9 +389,17 @@ func (b *board) workspace(ws *Workspace, task Task, log emit) (*Workspace, error
 
 // turnGit is what a turn's checkpoint found.
 type turnGit struct {
-	ok      bool
-	changes Changes
-	err     error
+	ok        bool // a checkpoint ran; changes is the branch's
+	changes   Changes
+	discarded int // files a planning turn changed, put back
+	err       error
+}
+
+// inPlace reports whether the task works in its folder, outside git: true
+// until its first turn says otherwise.
+func (b *board) inPlace(t *Task) bool {
+	_, err := git(t.Dir, "rev-parse", "--show-toplevel")
+	return err != nil
 }
 
 func commitMessage(t Task, turn int) string {
@@ -369,19 +453,23 @@ func modelSuffix(m string) string {
 }
 
 // finish records a turn's outcome. A stopped turn rests where the task was
-// before it: To Do for a first turn, else Review, the conversation kept.
-func (b *board) finish(t *Task, r result, err error, took time.Duration, before Status, resumed bool, g turnGit) {
+// before it; a plan rests at Confirm; work at Review.
+func (b *board) finish(t *Task, r result, err error, took time.Duration, before Status, o turnOpts, g turnGit) {
 	stopped := errors.Is(err, context.Canceled)
 	if cancel := b.runs[t.ID]; cancel != nil {
 		cancel()
 		delete(b.runs, t.ID)
 	}
-	if g.ok {
-		if g.err != nil {
-			t.addLog("✗ commit: " + g.err.Error())
-		} else {
-			t.Changes = g.changes
-		}
+	switch {
+	case g.err != nil && o.plan:
+		t.addLog("✗ undoing the planning turn's edits: " + g.err.Error())
+	case g.err != nil:
+		t.addLog("✗ commit: " + g.err.Error())
+	case g.ok:
+		t.Changes = g.changes
+	}
+	if g.discarded > 0 {
+		t.addLog(fmt.Sprintf("note: the planning turn changed %d files; they were put back", g.discarded))
 	}
 	t.Usage.add(r.Usage)
 	t.Duration += took
@@ -391,20 +479,26 @@ func (b *board) finish(t *Task, r result, err error, took time.Duration, before 
 	switch {
 	case r.SessionRef != "":
 		t.SessionRef = r.SessionRef
-	case !resumed: // the agent never reported its conversation: nothing to continue
+	case !o.resume: // the agent never reported its conversation: nothing to continue
 		t.SessionRef = ""
+	}
+	t.Stage = "build"
+	if o.plan {
+		t.Stage = "plan"
 	}
 	switch {
 	case stopped:
-		t.Status, t.Err = Review, ""
-		if before == Todo {
-			t.Status = Todo
-		}
+		t.Status, t.Err = before, ""
 		t.addLog("── stopped")
 	case err != nil:
 		t.Status, t.Err = Failed, err.Error()
 	case r.Err != "":
 		t.Status, t.Err = Failed, r.Err
+	case o.plan && strings.TrimSpace(r.Text) == "":
+		t.Status, t.Err = Failed, "the agent wrote no plan"
+	case o.plan:
+		t.Plans = append(t.Plans, strings.TrimSpace(r.Text))
+		t.Status = Confirm
 	default:
 		t.Status = Review
 	}
@@ -467,7 +561,11 @@ func (b *board) move(t *Task, to Status) {
 		return
 	}
 	if to == Running {
-		b.start(t)
+		if t.Status == Confirm {
+			b.confirm(t) // a plan dragged on is a plan confirmed
+		} else {
+			b.start(t)
+		}
 		return
 	}
 	t.Status = to

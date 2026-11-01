@@ -159,6 +159,24 @@ func (w *Workspace) checkpoint(agent, message string) (Changes, error) {
 	return w.changes()
 }
 
+// discard puts the worktree back as it was at head, before a read-only
+// turn, commits the agent made included, and reports how many files it had
+// changed.
+func (w *Workspace) discard(head string) (int, error) {
+	n := 0
+	if out, _ := git(w.Worktree, "status", "--porcelain"); out != "" {
+		n = len(strings.Split(out, "\n"))
+	}
+	if cur, _ := git(w.Worktree, "rev-parse", "HEAD"); n == 0 && cur == head {
+		return 0, nil
+	}
+	if _, err := git(w.Worktree, "reset", "--hard", "--quiet", head); err != nil {
+		return n, err
+	}
+	_, err := git(w.Worktree, "clean", "-fdq")
+	return max(n, 1), err
+}
+
 func (w *Workspace) files() ([]fileChange, error) {
 	out, err := git(w.Worktree, "diff", "--numstat", "--no-renames", w.BaseSHA, "HEAD")
 	if err != nil || out == "" {

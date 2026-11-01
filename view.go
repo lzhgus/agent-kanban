@@ -8,11 +8,13 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
+	"github.com/egoist/mygo/ui/markdown"
 )
 
 // palette holds the board's colors, light and dark.
@@ -74,7 +76,7 @@ func (p palette) status(s Status) ui.Color {
 	switch s {
 	case Running:
 		return p.brand
-	case Review:
+	case Review, Confirm:
 		return p.amber
 	case Done:
 		return p.muted
@@ -228,7 +230,7 @@ func (b *board) boardPane(c *ui.Context, p palette) {
 		for _, t := range b.Tasks {
 			if b.visible(t.Agent) && t.Status == Running {
 				running++
-			} else if b.visible(t.Agent) && t.Status == Review {
+			} else if b.visible(t.Agent) && (t.Status == Review || t.Status == Confirm) {
 				waiting++
 			}
 		}
@@ -290,6 +292,7 @@ func (b *board) composerView(c *ui.Context, p palette) {
 				ui.TextInput(c.Key("dir"), &b.dir).Placeholder("Working directory").Label("Working directory").Grow(1).Font("monospace").FontSize(12)
 			})
 			ui.TextInput(c.Key("title"), &b.title).Placeholder("Title (optional)").Label("Title").Width(160)
+			ui.Checkbox(c.Key("plan-first"), &b.PlanFirst, "Plan first").Tooltip("The agent writes a plan, without changing files, and waits for you to confirm it")
 		})
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "Runs headless with permissions bypassed: pick a folder you trust it with.").FontSize(11).TextColor(p.muted).Grow(1)
@@ -312,7 +315,7 @@ func (b *board) composerView(c *ui.Context, p palette) {
 // items returns what a column shows, under the agent filter.
 func (b *board) items(s Status) (tasks []*Task, sessions []*Session) {
 	for _, t := range b.Tasks {
-		if t.Status == s && b.visible(t.Agent) {
+		if (t.Status == s || s == Review && t.Status == Confirm) && b.visible(t.Agent) { // a plan waits with the work that does
 			tasks = append(tasks, t)
 		}
 	}
@@ -402,12 +405,15 @@ func (b *board) cardView(c *ui.Context, p palette, task *Task) {
 		e.Drag(task)
 	}
 	if e.Clicked() {
-		b.selected, b.selectedSession = task, ""
+		b.selected, b.selectedSession, b.tab = task, "", ""
 	}
 	e.Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Children(func() {
 			agentLabel(c, p, task.Agent, task.Status == Running)
 			ui.Box(c).Grow(1)
+			if task.Status == Confirm {
+				pill(c, "Plan", p.amber)
+			}
 			ui.Text(c, fmt.Sprintf("#%d", task.ID)).FontSize(11).Font("monospace").TextColor(p.muted)
 		})
 		ui.Text(c, task.Title).FontSize(13).FontWeight(600).Wrap().MaxLines(2)
@@ -518,7 +524,7 @@ func logView(c *ui.Context, p palette, key string, lines []string) {
 func replyView(c *ui.Context, p palette, b *board, task *Task) {
 	ui.Row(c).Gap(8).AlignItems(ui.End).Children(func() {
 		ui.TextArea(c.Key("reply"), &task.draft).Lines(1, 6).Grow(1).Radius(controlRadius).Background(p.column).
-			Placeholder("Reply to " + task.Agent + ": ask for changes or the next step").Label("Reply").
+			Placeholder(replyHint(task)).Label("Reply").
 			OnTextKey(func(k ui.TextKey) bool {
 				if k.Key != ui.KeyEnter || k.Mods != 0 {
 					return false // Shift+Enter breaks the line
@@ -535,7 +541,14 @@ func replyView(c *ui.Context, p palette, b *board, task *Task) {
 
 func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 	detailPane(c, p, fmt.Sprint("task-", task.ID), b.detailWidth(), func() {
-		detailHeader(c, p, task.Agent, task.Model, task.Status, string(task.Status), func() { b.selected = nil })
+		label := string(task.Status)
+		switch {
+		case task.Status == Confirm:
+			label = "Plan ready"
+		case task.Status == Running && task.Stage == "plan":
+			label = "Planning"
+		}
+		detailHeader(c, p, task.Agent, task.Model, task.Status, label, func() { b.selected = nil })
 		ui.Text(c, task.Title).FontSize(17).Bold().Wrap()
 		meta := fmt.Sprintf("#%d", task.ID)
 		if task.From != 0 {
@@ -566,6 +579,11 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 					b.stop(task)
 				}
 				return
+			}
+			if task.Status == Confirm {
+				if button(c, p, "confirm", "Confirm plan", iconPlay, primary).Tooltip("Build it: the agent implements the plan in the same conversation").Clicked() {
+					b.confirm(task)
+				}
 			}
 			if task.Runs == 0 {
 				if button(c, p, "run", "Run", iconPlay, primary).Clicked() {
@@ -598,16 +616,22 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 				}
 			})
 		}
-		if task.WS != nil {
-			changes := "Changes"
-			if n := task.Changes.Files; n > 0 {
-				changes = fmt.Sprintf("Changes · %d", n)
+		tabs, labels := detailTabs(task)
+		current := b.currentTab(task)
+		if len(tabs) > 1 {
+			i := slices.Index(tabs, current)
+			if ui.Segmented(c.Key("detail-tab"), &i, labels...).Label("Detail view").Changed() {
+				b.tab, current = tabs[i], tabs[i]
 			}
-			ui.Segmented(c.Key("detail-tab"), &b.detailTab, "Activity", changes).Label("Detail view")
 		}
-		if task.WS != nil && b.detailTab == 1 {
+		switch current {
+		case "Plan":
+			ui.Scroll(c.Key("plan")).Grow(1).Padding(14, 16).Radius(10).Background(p.column).Children(func() {
+				markdown.View(c, task.Plans[len(task.Plans)-1], &b.md)
+			})
+		case "Changes":
 			b.changesView(c, p, task)
-		} else {
+		default:
 			logView(c, p, "log", append([]string{"› " + firstLine(task.Prompt)}, task.Log...))
 		}
 		if task.Status != Running && task.Status != Todo && task.SessionRef != "" {
@@ -762,10 +786,47 @@ func ago(t time.Time) string {
 
 // detailWidth is the detail pane's: wider while it shows a task's diff.
 func (b *board) detailWidth() float32 {
-	if t := b.selected; t != nil && t.WS != nil && b.detailTab == 1 {
+	if t := b.selected; t != nil && b.currentTab(t) == "Changes" {
 		return changesWidth
 	}
 	return detailWidth
+}
+
+// detailTabs lists a task's tabs: its activity, its plan once there is one,
+// its changes once it has a branch.
+func detailTabs(t *Task) (tabs, labels []string) {
+	tabs, labels = []string{"Activity"}, []string{"Activity"}
+	if n := len(t.Plans); n > 0 {
+		tabs, labels = append(tabs, "Plan"), append(labels, fmt.Sprintf("Plan · v%d", n))
+	}
+	if t.WS != nil {
+		label := "Changes"
+		if n := t.Changes.Files; n > 0 {
+			label = fmt.Sprintf("Changes · %d", n)
+		}
+		tabs, labels = append(tabs, "Changes"), append(labels, label)
+	}
+	return tabs, labels
+}
+
+// currentTab is the tab chosen, or, until one is, the plan while it waits
+// for you and the activity otherwise.
+func (b *board) currentTab(t *Task) string {
+	tabs, _ := detailTabs(t)
+	if slices.Contains(tabs, b.tab) {
+		return b.tab
+	}
+	if t.Status == Confirm && slices.Contains(tabs, "Plan") {
+		return "Plan"
+	}
+	return "Activity"
+}
+
+func replyHint(t *Task) string {
+	if t.Status == Confirm {
+		return "Reply to revise the plan, or confirm it to build"
+	}
+	return "Reply to " + t.Agent + ": ask for changes or the next step"
 }
 
 // ── changes ─────────────────────────────────────────────────────────────────

@@ -133,6 +133,9 @@ func claudeArgs(t Task) []string {
 	if t.Model != "" {
 		args = append(args, "--model", t.Model)
 	}
+	if t.readOnly { // Bash can still write: what it leaves is undone after the turn
+		args = append(args, "--disallowedTools=Write,Edit,NotebookEdit")
+	}
 	if t.SessionRef != "" {
 		if t.resume {
 			args = append(args, "--resume", t.SessionRef)
