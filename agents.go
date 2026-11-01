@@ -26,6 +26,8 @@ type Usage struct {
 	CostUSD                              float64
 }
 
+func (u Usage) total() int { return u.Input + u.Output + u.CacheRead + u.CacheWrite }
+
 func (u *Usage) add(v Usage) {
 	u.Input += v.Input
 	u.Output += v.Output

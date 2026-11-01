@@ -141,7 +141,7 @@ func TestStopPlanning(t *testing.T) {
 	if task.Status != Todo || len(task.Plans) != 0 {
 		t.Errorf("after stopping the plan: %+v", task)
 	}
-	if !strings.Contains(strings.Join(task.Log, "\n"), "planning outside git") {
+	if !strings.Contains(strings.Join(task.Log, "\n"), "outside git, nothing undoes") {
 		t.Errorf("no warning about planning in place: %q", task.Log)
 	}
 }

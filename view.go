@@ -187,9 +187,14 @@ func (b *board) agentRow(c *ui.Context, p palette, name, label string) {
 		if name == "" || t.Agent == name {
 			n++
 			u.add(t.Usage)
-			total += t.Usage.Input + t.Usage.CacheRead + t.Usage.CacheWrite + t.Usage.Output
+		}
+		for agent, o := range t.Others { // reviews count for the reviewer
+			if name == "" || agent == name {
+				u.add(o)
+			}
 		}
 	}
+	total = u.Input + u.CacheRead + u.CacheWrite + u.Output
 	for _, s := range b.sessions {
 		if name == "" || s.Agent == name {
 			n++
@@ -411,15 +416,18 @@ func (b *board) cardView(c *ui.Context, p palette, task *Task) {
 		ui.Row(c).AlignItems(ui.Center).Children(func() {
 			agentLabel(c, p, task.Agent, task.Status == Running)
 			ui.Box(c).Grow(1)
-			if task.Status == Confirm {
+			switch {
+			case task.rev != nil:
+				pill(c, "AI review", p.sky)
+			case task.Status == Confirm:
 				pill(c, "Plan", p.amber)
 			}
 			ui.Text(c, fmt.Sprintf("#%d", task.ID)).FontSize(11).Font("monospace").TextColor(p.muted)
 		})
 		ui.Text(c, task.Title).FontSize(13).FontWeight(600).Wrap().MaxLines(2)
 		meta := filepath.Base(task.Dir)
-		if total := task.Usage.Input + task.Usage.CacheRead + task.Usage.CacheWrite + task.Usage.Output; total > 0 {
-			meta += " · " + tokens(total) + " tok" + cost(task.Usage.CostUSD)
+		if u := task.spent(); u.total() > 0 {
+			meta += " · " + tokens(u.total()) + " tok" + cost(u.CostUSD)
 		}
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, meta).FontSize(11).Font("monospace").TextColor(p.muted).MaxLines(1).Shrink(1).MinWidth(0)
@@ -545,7 +553,11 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 		switch {
 		case task.Status == Confirm:
 			label = "Plan ready"
-		case task.Status == Running && task.Stage == "plan":
+		case task.Status == Running && task.rev != nil && strings.HasPrefix(task.doing, "review"):
+			label = fmt.Sprintf("Reviewing · %d/%d", task.rev.round, task.rev.rounds)
+		case task.Status == Running && task.doing == "revision":
+			label = "Revising"
+		case task.Status == Running && task.doing == "plan":
 			label = "Planning"
 		}
 		detailHeader(c, p, task.Agent, task.Model, task.Status, label, func() { b.selected = nil })
@@ -559,7 +571,7 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 		if ws := task.WS; ws != nil {
 			branchLine(c, p, task)
 		}
-		u := task.Usage
+		u := task.spent()
 		ui.Row(c).Gap(6).Children(func() {
 			stat(c, p, "IN", tokens(u.Input+u.CacheRead+u.CacheWrite))
 			stat(c, p, "OUT", tokens(u.Output))
@@ -606,16 +618,7 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 				b.remove(task)
 			}
 		})
-		if task.Status == Review || task.Status == Done {
-			ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(8, 10).Radius(controlRadius).Background(p.column).Children(func() {
-				ui.Text(c, "Hand off to").FontSize(12).TextColor(p.muted).Shrink(0)
-				ui.Select(c.Key("handoff-to"), &b.handoffTo, agentNames).Label("Hand off to").Width(130)
-				ui.Box(c).Grow(1)
-				if button(c, p, "handoff", "Review & continue", iconArrow, secondary).Clicked() {
-					b.handoff(task, b.handoffTo)
-				}
-			})
-		}
+		b.otherAgentRow(c, p, task)
 		tabs, labels := detailTabs(task)
 		current := b.currentTab(task)
 		if len(tabs) > 1 {
@@ -828,6 +831,47 @@ func replyHint(t *Task) string {
 	}
 	return "Reply to " + t.Agent + ": ask for changes or the next step"
 }
+
+// otherAgentRow brings in another agent: to review at a gate, the task's
+// agent revising, for up to the rounds chosen; or to take the work over in
+// a task of its own, on the same branch.
+func (b *board) otherAgentRow(c *ui.Context, p palette, t *Task) {
+	canReview := t.Status == Review || (t.Status == Confirm && len(t.Plans) > 0)
+	canHandOff := t.Status == Review || t.Status == Done
+	if !canReview && !canHandOff {
+		return
+	}
+	if b.reviewerFor != t { // another agent than the task's, at first
+		b.reviewer, b.reviewerFor = agentNames[0], t
+		for _, a := range agentNames {
+			if a != t.Agent {
+				b.reviewer = a
+				break
+			}
+		}
+	}
+	ui.Column(c.Key("other-agent")).Gap(8).Padding(10).Radius(controlRadius).Background(p.column).Children(func() {
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "Another agent").FontSize(12).TextColor(p.muted).Shrink(0)
+			ui.Select(c.Key("reviewer"), &b.reviewer, agentNames).Label("Another agent").Grow(1).MinWidth(0)
+			if canReview {
+				ui.Select(c.Key("rounds"), &b.rounds, roundChoices).Label("Rounds").Width(110)
+			}
+		})
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+			if canReview && button(c, p, "review", "Start review", iconEye, secondary).
+				Tooltip("It reviews, "+t.Agent+" revises, for up to the rounds chosen; an approval ends it early").Clicked() {
+				b.review(t, b.reviewer, slices.Index(roundChoices, b.rounds)+1)
+			}
+			if canHandOff && button(c, p, "handoff", "Hand off", iconArrow, ghost).
+				Tooltip("A new task: "+b.reviewer+" reviews and continues the work, on the same branch").Clicked() {
+				b.handoff(t, b.reviewer)
+			}
+		})
+	})
+}
+
+var roundChoices = []string{"1 round", "2 rounds", "3 rounds"}
 
 // ── changes ─────────────────────────────────────────────────────────────────
 

@@ -69,11 +69,15 @@ type Task struct {
 	PlanFirst bool
 	Plans     []string // the plan's versions, the last current
 	Stage     string   // "plan" or "build": what its last turn did
+	// What other agents spent on it, reviewing: by agent.
+	Others map[string]Usage
 
 	resume   bool   // this turn continues SessionRef (the drivers' copy only)
 	readOnly bool   // this turn may read but not write (the drivers' copy only)
 	draft    string // the reply being written in the detail panel
 	merging  bool
+	rev      *reviewLoop // the AI review going on, if one is
+	doing    string      // the running turn's kind, for its label
 }
 
 // newUUID returns a random version 4 UUID.
@@ -86,6 +90,15 @@ func newUUID() string {
 }
 
 const logCap = 2000 // ponytail: lines kept per task; the board file grows with it
+
+// spent is everything the task cost: its agent's turns and its reviews.
+func (t *Task) spent() Usage {
+	u := t.Usage
+	for _, o := range t.Others {
+		u.add(o)
+	}
+	return u
+}
 
 func (t *Task) addLog(line string) {
 	t.Log = append(t.Log, line)
@@ -118,12 +131,14 @@ type board struct {
 	procs           sync.WaitGroup // drivers still running, for quitting
 	update          func(func())   // runs a function on the main thread: Window.Update
 
-	// the new-task form and the handoff picker
-	title, prompt, agent, model, dir, handoffTo string
+	// the new-task form, the handoff picker and the review row
+	title, prompt, agent, model, dir string
+	reviewer, rounds                 string
+	reviewerFor                      *Task
 }
 
 func newBoard(path string) *board {
-	b := &board{path: path, runs: map[int]context.CancelFunc{}, agent: agentNames[0], handoffTo: agentNames[1],
+	b := &board{path: path, runs: map[int]context.CancelFunc{}, agent: agentNames[0], rounds: roundChoices[0],
 		worktrees: filepath.Join(filepath.Dir(path), "worktrees")}
 	if path == "" {
 		b.worktrees = filepath.Join(os.TempDir(), "agent-kanban-worktrees")
@@ -214,6 +229,10 @@ type turnOpts struct {
 	fresh  bool   // start over: a new conversation, and a new branch
 	plan   bool   // a read-only planning turn, which ends at Confirm
 	said   string // your words, for the log
+	// reviewer runs a read-only review turn by that agent, in a conversation
+	// of its own, instead of a turn of the task's agent.
+	reviewer string
+	revision bool // the task's agent answers a review: the loop goes on after it
 }
 
 // start runs a task's prompt in a new conversation: its first turn, or a
@@ -268,9 +287,13 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 	if _, running := b.runs[t.ID]; running {
 		return // one turn at a time per conversation
 	}
-	drive := drivers[t.Agent]
+	agent := t.Agent
+	if o.reviewer != "" {
+		agent = o.reviewer
+	}
+	drive := drivers[agent]
 	if drive == nil {
-		t.Status, t.Err = Failed, "unknown agent "+t.Agent
+		t.Status, t.Err = Failed, "unknown agent "+agent
 		b.save()
 		return
 	}
@@ -297,9 +320,12 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 		w := *t.WS
 		ws = &w
 	}
-	t.Status, t.Err, t.Merged = Running, "", false // new work is not merged yet
+	t.Status, t.Err = Running, ""
+	if o.reviewer == "" {
+		t.Merged = false // new work is not merged yet
+	}
 	t.Runs++
-	if !o.resume { // a new conversation
+	if !o.resume && o.reviewer == "" { // a new conversation
 		t.SessionRef = ""
 		if t.Agent == "claude" { // Claude takes the id we give it
 			t.SessionRef = newUUID()
@@ -309,23 +335,36 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 	if len(t.Log) > 0 {
 		t.addLog("")
 	}
-	kind := "turn"
+	kind, model := fmt.Sprintf("turn %d", t.Runs), t.Model
 	switch {
 	case o.fresh:
 		kind = "new conversation"
+	case o.reviewer != "":
+		kind, model = fmt.Sprintf("review %d/%d", t.rev.round, t.rev.rounds), ""
+	case o.revision:
+		kind = "revision"
 	case o.plan:
 		kind = "plan"
 	}
-	t.addLog(fmt.Sprintf("── %s %d · %s%s · %s", kind, t.Runs, t.Agent, modelSuffix(t.Model), time.Now().Format("15:04:05")))
+	t.addLog(fmt.Sprintf("── %s · %s%s · %s", kind, agent, modelSuffix(model), time.Now().Format("15:04:05")))
+	t.doing = kind
 	if o.said != "" {
 		t.addLog("› " + o.said)
 	}
-	if o.plan && t.WS == nil && b.inPlace(t) {
-		t.addLog("note: planning outside git: nothing undoes edits the agent makes anyway")
+	readOnly := o.plan || o.reviewer != ""
+	if readOnly && t.WS == nil && b.inPlace(t) {
+		t.addLog("note: outside git, nothing undoes edits the agent makes anyway")
+	}
+	task, began := *t, time.Now() // the driver reads a copy, never the board
+	task.Prompt, task.resume, task.readOnly = prompt, o.resume, readOnly
+	if o.reviewer != "" { // the reviewer's own conversation, never the task's
+		task.Agent, task.Model, task.SessionRef, task.resume = o.reviewer, "", "", false
+		if o.reviewer == "claude" {
+			task.SessionRef = newUUID()
+			t.SessionIDs = append(t.SessionIDs, task.SessionRef) // the watcher leaves it to the task
+		}
 	}
 	b.save()
-	task, began := *t, time.Now() // the driver reads a copy, never the board
-	task.Prompt, task.resume, task.readOnly = prompt, o.resume, o.plan
 	b.procs.Add(1)
 	go func() {
 		defer b.procs.Done()
@@ -333,7 +372,10 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 		if drop != nil {
 			drop.remove()
 		}
-		ws, err := b.workspace(ws, task, log)
+		var err error
+		if ws != nil || o.reviewer == "" { // a review uses the task's worktree, or its folder
+			ws, err = b.workspace(ws, task, log)
+		}
 		if err != nil {
 			b.update(func() { b.finish(t, result{}, err, time.Since(began), before, o, turnGit{}) })
 			return
@@ -349,7 +391,7 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 		}
 		var g turnGit
 		switch {
-		case ws != nil && o.plan: // a plan changes nothing: what the agent left goes
+		case ws != nil && readOnly: // a plan or a review changes nothing: what the agent left goes
 			g.discarded, g.err = ws.discard(head)
 		case ws != nil: // every turn ends in a commit, stopped and failed ones too
 			g.changes, g.err = ws.checkpoint(task.Agent, commitMessage(task, task.Runs))
@@ -461,18 +503,23 @@ func (b *board) finish(t *Task, r result, err error, took time.Duration, before 
 		delete(b.runs, t.ID)
 	}
 	switch {
-	case g.err != nil && o.plan:
-		t.addLog("✗ undoing the planning turn's edits: " + g.err.Error())
+	case g.err != nil && (o.plan || o.reviewer != ""):
+		t.addLog("✗ undoing the read-only turn's edits: " + g.err.Error())
 	case g.err != nil:
 		t.addLog("✗ commit: " + g.err.Error())
 	case g.ok:
 		t.Changes = g.changes
 	}
 	if g.discarded > 0 {
-		t.addLog(fmt.Sprintf("note: the planning turn changed %d files; they were put back", g.discarded))
+		t.addLog(fmt.Sprintf("note: the read-only turn changed %d files; they were put back", g.discarded))
+	}
+	t.Duration += took
+	if o.reviewer != "" {
+		b.finishReview(t, r, err, before, o.reviewer)
+		b.save()
+		return
 	}
 	t.Usage.add(r.Usage)
-	t.Duration += took
 	if r.Text != "" {
 		t.Result = r.Text
 	}
@@ -488,7 +535,7 @@ func (b *board) finish(t *Task, r result, err error, took time.Duration, before 
 	}
 	switch {
 	case stopped:
-		t.Status, t.Err = before, ""
+		t.Status, t.Err, t.rev = before, "", nil // a stop ends a review loop too
 		t.addLog("── stopped")
 	case err != nil:
 		t.Status, t.Err = Failed, err.Error()
@@ -504,6 +551,9 @@ func (b *board) finish(t *Task, r result, err error, took time.Duration, before 
 	}
 	if t.Err != "" {
 		t.addLog("✗ " + t.Err)
+	}
+	if o.revision {
+		b.afterRevision(t)
 	}
 	b.save()
 }

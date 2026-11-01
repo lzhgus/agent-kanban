@@ -244,7 +244,7 @@ func TestBoard(t *testing.T) {
 	}
 
 	tt.Frame()
-	if err := tt.Click("Review & continue"); err != nil {
+	if err := tt.Click("Hand off"); err != nil {
 		t.Fatal(err)
 	}
 	next := b.Tasks[1]
