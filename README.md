@@ -70,6 +70,18 @@ Click **New task**, describe what to do, pick an agent and a folder, and press
 **Add & Run**. Tick **Plan first** to review a plan before the agent changes
 anything.
 
+### Build the app
+
+To keep it in Applications and open it from the Dock or Spotlight:
+
+```sh
+go run github.com/egoist/mygo/cmd/mygo build -skip-dmg
+cp -R "build/darwin-arm64/Agent Kanban.app" /Applications/
+```
+
+Opened from Finder, it reads your login shell's `PATH` to find the agent
+CLIs. The app and `go run .` share the same board.
+
 Linux should work but is untested. Windows is not supported yet.
 
 ## How a task flows

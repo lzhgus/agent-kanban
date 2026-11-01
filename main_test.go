@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -306,5 +307,27 @@ func TestSessionStatus(t *testing.T) {
 	b.moveSession(s, Running)
 	if got := b.sessionStatus(s); got != Review {
 		t.Errorf("dragged to Running: %s", got)
+	}
+}
+
+// Opened from Finder, the app takes the login shell's PATH, whatever the
+// shell's startup prints around it.
+func TestShellPath(t *testing.T) {
+	noisy := "[WARN] - (starship::utils): Executing command timed out.\n\n" + pathMarker + "/x/bin:/usr/bin" + pathMarker + "\n% "
+	if p := markedPath([]byte(noisy)); p != "/x/bin:/usr/bin" {
+		t.Errorf("markedPath %q", p)
+	}
+	if p := markedPath([]byte("no markers")); p != "" {
+		t.Errorf("markedPath without markers %q", p)
+	}
+	if _, err := os.Stat("/bin/zsh"); err != nil {
+		t.Skip("no zsh")
+	}
+	t.Setenv("TERM", "")
+	t.Setenv("SHELL", "/bin/zsh")
+	t.Setenv("PATH", "/nowhere")
+	useShellPath()
+	if p := os.Getenv("PATH"); !strings.HasSuffix(p, ":/nowhere") || !strings.Contains(p, "/usr/bin") {
+		t.Errorf("PATH %q", p)
 	}
 }

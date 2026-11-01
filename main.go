@@ -8,6 +8,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -17,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -887,7 +889,39 @@ func (b *board) remove(t *Task) {
 	b.save()
 }
 
+// useShellPath gives an app opened from Finder or the Dock, which gets the
+// system's bare PATH, the PATH of the user's login shell: the agents' CLIs
+// are on it (~/.local/bin, Homebrew, npm). Run from a terminal, it has it.
+func useShellPath() {
+	if os.Getenv("TERM") != "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// Interactive too: .zshrc is where many put PATH. Its prompts and
+	// warnings print around the markers.
+	out, err := exec.CommandContext(ctx, cmp.Or(os.Getenv("SHELL"), "/bin/zsh"), "-ilc", `printf '\n'"$1"'%s'"$1"'\n' "$PATH"`, "sh", pathMarker).Output()
+	if p := markedPath(out); p != "" {
+		os.Setenv("PATH", p+string(os.PathListSeparator)+os.Getenv("PATH"))
+	} else {
+		log.Printf("reading the login shell's PATH: %v", err)
+	}
+}
+
+const pathMarker = "__AGENT_KANBAN_PATH__"
+
+// markedPath finds the PATH the shell printed between the markers.
+func markedPath(out []byte) string {
+	_, rest, ok := strings.Cut(string(out), pathMarker)
+	p, _, ok2 := strings.Cut(rest, pathMarker)
+	if !ok || !ok2 {
+		return ""
+	}
+	return strings.TrimSpace(p)
+}
+
 func main() {
+	useShellPath()
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		log.Fatal(err)
