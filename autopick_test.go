@@ -173,3 +173,104 @@ func TestQuickAddView(t *testing.T) {
 		t.Error("the switch did not turn Auto on")
 	}
 }
+
+// A column takes both what is dragged onto it: a task dragged to Running
+// starts, a session dragged to Done is done.
+func TestDragCards(t *testing.T) {
+	onlyInstalled(t, "antigravity")
+	g := &gated{gates: map[string]chan struct{}{"run me": make(chan struct{})}}
+	g.install(t)
+	b, drain := boardWith(t)
+	b.dir = t.TempDir()
+	b.quickAdd("run me", "antigravity")
+	task := b.Tasks[0]
+	sess := &Session{Agent: "codex", ID: "s1", Title: "outside", Updated: time.Now().Add(-time.Minute)}
+	b.setSessions([]*Session{sess})
+	tt := ui.NewTester(b.view, 1440, 880)
+	tt.Frame()
+	drag := func(label, column string) {
+		from, ok1 := tt.Find(label)
+		to, ok2 := tt.Find(column)
+		if !ok1 || !ok2 {
+			t.Fatalf("no %q or %q", label, column)
+		}
+		x, y, tx, ty := from.X+20, from.Y+20, to.X+20, to.Y+300 // into the column, under its header
+		tt.Press(x, y)
+		for k := float32(1); k <= 4; k++ {
+			tt.Move(x+(tx-x)*k/4, y+(ty-y)*k/4)
+		}
+		tt.Release(tx, ty)
+		tt.Frame()
+	}
+	drag("run me", "Running")
+	if !started(task) {
+		t.Errorf("the task dragged to Running: %s", task.Status)
+	}
+	drag("outside", "Done")
+	if st := b.sessionStatus(sess); st != Done {
+		t.Errorf("the session dragged to Done: %s", st)
+	}
+	close(g.gates["run me"])
+	drain(task)
+}
+
+// A task that never ran moves to the folder chosen; the quick add files in
+// the folder chosen there. Cards show they take a click.
+func TestChooseFolder(t *testing.T) {
+	onlyInstalled(t)
+	saved := pickFolder
+	pickFolder = func(string) string { return "/x/other" }
+	t.Cleanup(func() { pickFolder = saved })
+	b, _ := boardWith(t)
+	b.dir = "/x/app"
+	b.quickAdd("fix it", "claude")
+	task := b.Tasks[0]
+	b.selected = task
+	tt := ui.NewTester(b.view, 1440, 880)
+	tt.Frame()
+	chosen := func() {
+		t.Helper()
+		select {
+		case f := <-queue:
+			f()
+		case <-time.After(5 * time.Second):
+			t.Fatal("no folder came back")
+		}
+		tt.Frame()
+	}
+	if err := tt.Click("Change folder"); err != nil {
+		t.Fatal(err)
+	}
+	chosen()
+	if task.Dir != "/x/other" || b.LastDir != "/x/other" {
+		t.Errorf("the task's folder: %q", task.Dir)
+	}
+
+	b.selected, b.dir, b.quickAdding = nil, "/x/app", true
+	tt.Frame()
+	if err := tt.Click("Folder"); err != nil {
+		t.Fatal(err)
+	}
+	chosen()
+	b.quickAdd("another", "claude")
+	if b.Tasks[1].Dir != "/x/other" {
+		t.Errorf("the quick add's folder: %q", b.Tasks[1].Dir)
+	}
+
+	task.Runs = 1 // ran there: it stays
+	b.setDir(task, "/x/third")
+	if task.Dir != "/x/other" {
+		t.Errorf("a task that ran moved: %q", task.Dir)
+	}
+
+	tt.Frame()
+	r, ok := tt.Find("another")
+	if !ok {
+		t.Fatal("no card")
+	}
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	tt.Frame()
+	if tt.Cursor() != ui.CursorPointer {
+		t.Errorf("cursor over a card: %v", tt.Cursor())
+	}
+}

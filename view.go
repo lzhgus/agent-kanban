@@ -355,7 +355,9 @@ func (b *board) composerView(c *ui.Context, p palette) {
 			ui.Select(c.Key("agent"), &b.agent, agentChoices).Label("Agent").Width(130)
 			ui.TextInput(c.Key("model"), &b.model).Placeholder("Model (default)").Label("Model").Width(140)
 			ui.Row(c).Grow(1).MinWidth(0).Gap(6).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, iconFolder).Size(14, 14).TextColor(p.muted)
+				if button(c, p, "choose-dir", "", iconFolder, ghost).Label("Choose folder").Tooltip("Choose folder").Clicked() {
+					b.chooseFolder(b.dir, func(dir string) { b.dir = dir })
+				}
 				ui.TextInput(c.Key("dir"), &b.dir).Placeholder("Working directory").Label("Working directory").Grow(1).Font("monospace").FontSize(12)
 			})
 			ui.TextInput(c.Key("title"), &b.title).Placeholder("Title (optional)").Label("Title").Width(160)
@@ -397,21 +399,23 @@ func (b *board) items(s Status) (tasks []*Task, sessions []*Session) {
 
 func (b *board) columnView(c *ui.Context, p palette, s Status, tasks []*Task, sessions []*Session, width float32) {
 	col := ui.Column(c.Key(s)).Width(width).Shrink(0).Padding(10, 8, 8, 8).Gap(8).Radius(10).Background(p.column)
+	// A column takes tasks and sessions both: one Drop of any, as an
+	// element takes the type of its last Drop or DragOver only.
 	over := false
-	if task, ok := ui.DragOver[*Task](col); ok && task.Status != s {
-		over = true
-	}
-	if sess, ok := ui.DragOver[*Session](col); ok && (s == Done || s == Review) && b.sessionStatus(sess) != s {
-		over = true
+	switch v, _ := ui.DragOver[any](col); v := v.(type) {
+	case *Task:
+		over = v.Status != s
+	case *Session:
+		over = (s == Done || s == Review) && b.sessionStatus(v) != s
 	}
 	if over {
 		col.Background(p.lime.Alpha(0.16)).Border(1, p.brand.Alpha(0.5)).BorderStyle(ui.BorderDashed)
 	}
-	if task, ok := ui.Drop[*Task](col); ok {
-		b.move(task, s)
-	}
-	if sess, ok := ui.Drop[*Session](col); ok {
-		b.moveSession(sess, s)
+	switch v, _ := ui.Drop[any](col); v := v.(type) {
+	case *Task:
+		b.move(v, s)
+	case *Session:
+		b.moveSession(v, s)
 	}
 	if s == Todo && col.DoubleClicked() { // a double click on the column, not on a card, adds a task
 		b.quickAdding = true
@@ -419,8 +423,8 @@ func (b *board) columnView(c *ui.Context, p palette, s Status, tasks []*Task, se
 	col.Children(func() {
 		ui.Row(c).Gap(7).AlignItems(ui.Center).Padding(0, 4, 2, 4).Tooltip(statusHint[s]).Children(func() {
 			statusDot(c, p.status(s), false)
-			ui.Text(c, string(s)).FontSize(12.5).Bold().MaxLines(1)
-			ui.Text(c, fmt.Sprint(len(tasks)+len(sessions))).FontSize(11.5).TextColor(p.muted).FontFeatures("tnum")
+			ui.Text(c, string(s)).FontSize(12.5).Bold().MaxLines(1).Shrink(0)
+			ui.Text(c, fmt.Sprint(len(tasks)+len(sessions))).FontSize(11.5).TextColor(p.muted).FontFeatures("tnum").Shrink(0)
 			if s == Todo {
 				b.todoControls(c, p)
 			}
@@ -483,12 +487,17 @@ func (b *board) quickAddView(c *ui.Context, p palette) {
 				return false
 			})
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-			ui.Select(c.Key("quick-agent"), &b.quickAgent, agentChoices).Label("Agent").Width(110)
-			ui.Text(c, "in "+filepath.Base(expandHome(b.dir))).FontSize(10.5).Font("monospace").TextColor(p.muted).MaxLines(1).Shrink(1).MinWidth(0).Tooltip(b.dir)
+			ui.Select(c.Key("quick-agent"), &b.quickAgent, agentChoices).Label("Agent").Width(120).Shrink(1).MinWidth(70)
 			ui.Box(c).Grow(1)
 			if buttonIf(c, p, "quick-add-go", "Add", nil, primary, strings.TrimSpace(b.quick) == "").Clicked() {
 				b.quickAdd(b.quick, b.quickAgent)
 				b.quick, b.quickAdding = "", false
+			}
+		})
+		// The folder it works in: the last one chosen, a click to choose another.
+		ui.Row(c).Children(func() {
+			if button(c, p, "quick-dir", filepath.Base(expandHome(b.dir)), iconFolder, ghost).Label("Folder").Tooltip(b.dir + ": click to choose another folder").Shrink(1).MinWidth(0).Clicked() {
+				b.chooseFolder(b.dir, func(dir string) { b.dir = dir })
 			}
 		})
 	})
@@ -497,7 +506,7 @@ func (b *board) quickAddView(c *ui.Context, p palette) {
 // card is the shared face of a task and a session: it lifts under the
 // pointer and gives a little under a press.
 func card(e ui.Element, p palette, selected bool) ui.Element {
-	e.Padding(11, 12).Gap(6).Radius(10).Background(p.card).
+	e.Cursor(ui.CursorPointer).Padding(11, 12).Gap(6).Radius(10).Background(p.card).
 		Shadow(0, 1, 2, 0, p.ink.Alpha(0.06)).InsetShadow(0, 0, 0, 1, p.stroke.Alpha(0.7))
 	pose := ui.Pose{}
 	switch {
@@ -634,7 +643,7 @@ func stat(c *ui.Context, p palette, label, value string) {
 func pathLine(c *ui.Context, p palette, dir string) {
 	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 		ui.Icon(c, iconFolder).Size(12, 12).TextColor(p.muted)
-		ui.Text(c, dir).FontSize(11.5).Font("monospace").TextColor(p.muted).Selectable().MaxLines(1)
+		ui.Text(c, dir).FontSize(11.5).Font("monospace").TextColor(p.muted).Selectable().MaxLines(1).Shrink(1).MinWidth(0)
 	})
 }
 
@@ -705,7 +714,14 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 			meta += fmt.Sprintf(" · from #%d", task.From)
 		}
 		ui.Text(c, meta).FontSize(11.5).TextColor(p.muted)
-		pathLine(c, p, task.Dir)
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			pathLine(c, p, task.Dir)
+			if task.Runs == 0 && !started(task) {
+				if button(c, p, "change-dir", "Change folder", nil, ghost).Tooltip("Choose the folder the agent works in").Clicked() {
+					b.chooseFolder(task.Dir, func(dir string) { b.setDir(task, dir) })
+				}
+			}
+		})
 		if ws := task.WS; ws != nil {
 			branchLine(c, p, task)
 		}
@@ -869,12 +885,12 @@ func buttonIf(c *ui.Context, p palette, key, label string, icon *ui.SVG, kind bu
 	}
 	e.AnimatePose(ui.Pose{Scale: scale}, ui.Snappy)
 	e.Children(func() {
-		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Gap(6).AlignItems(ui.Center).MinWidth(0).Children(func() {
 			if icon != nil {
 				ui.Icon(c, icon).Size(13, 13)
 			}
 			if label != "" {
-				ui.Text(c, label).FontSize(12.5).FontWeight(600)
+				ui.Text(c, label).FontSize(12.5).FontWeight(600).MaxLines(1).Shrink(1).MinWidth(0)
 			}
 		})
 	})

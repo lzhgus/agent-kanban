@@ -255,6 +255,35 @@ func (b *board) file(title, prompt, agent, model string) *Task {
 	return t
 }
 
+// pickFolder asks for a folder with the system's dialog, opening at start;
+// "" when canceled. It blocks until then.
+var pickFolder = func(start string) string {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Title: "Choose the folder the agent works in", DefaultPath: start,
+		Directory: true, CreateDirectories: true, ButtonLabel: "Choose"})
+	if err != nil || len(paths) == 0 {
+		return ""
+	}
+	return paths[0]
+}
+
+// chooseFolder asks for a folder off the UI thread and gives it to set.
+func (b *board) chooseFolder(start string, set func(dir string)) {
+	go func() {
+		if dir := pickFolder(expandHome(strings.TrimSpace(start))); dir != "" {
+			b.update(func() { set(dir) })
+		}
+	}()
+}
+
+// setDir moves a task that never ran to another folder.
+func (b *board) setDir(t *Task, dir string) {
+	if t.Runs > 0 || started(t) {
+		return
+	}
+	t.Dir, t.WS, b.LastDir = dir, nil, dir
+	b.save()
+}
+
 // quickAdd files a task from the To Do column: its first line is its title.
 func (b *board) quickAdd(text, agent string) {
 	if text = strings.TrimSpace(text); text == "" {
