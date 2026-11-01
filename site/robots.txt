@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://agent-kanban.lzhgus.com/sitemap.xml

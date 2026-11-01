@@ -1,6 +1,24 @@
-# Agent Kanban
+<p align="center">
+  <img src="assets/icon.png" width="128" height="128" alt="Agent Kanban app icon">
+</p>
 
-**One board for the coding agents you already use.**
+<h1 align="center">Agent Kanban</h1>
+
+<p align="center">
+  <b>One board for all your coding agents.</b><br>
+  <a href="https://agent-kanban.lzhgus.com">Website</a> ·
+  <a href="https://agent-kanban.lzhgus.com/demo/">Live demo</a> ·
+  <a href="#getting-started">Getting started</a><br>
+  <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
+  <a href="https://agent-kanban.lzhgus.com">
+    <img src="assets/promo-en.gif" width="760" alt="20-second demo: a new task goes from To Do to Running, gets reviewed by another agent, and lands in Done">
+  </a>
+  <br>
+  <sub>20-second promo (mocked data). <a href="site/media/promo-en.mp4">MP4 version</a> · <a href="https://agent-kanban.lzhgus.com/demo/">interactive version</a></sub>
+</p>
 
 Agent Kanban is a desktop app that runs Claude Code, GitHub Copilot CLI and
 Antigravity as tasks on a kanban board. Each task works on its own git
@@ -124,6 +142,18 @@ go vet ./...
 
 Built with [MyGo](https://github.com/egoist/mygo), which draws the native UI
 in pure Go.
+
+## Website
+
+The landing page at [agent-kanban.lzhgus.com](https://agent-kanban.lzhgus.com)
+lives in [`site/`](site): plain HTML, CSS and a few lines of JS. The English
+and Chinese pages are generated from one template:
+
+```sh
+python3 scripts/build-site.py   # writes site/index.html and site/zh/index.html
+```
+
+It is served as-is by Cloudflare Pages; there is no build step.
 
 ## License
 

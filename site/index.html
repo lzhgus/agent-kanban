@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agent Kanban — One board for all your coding agents</title>
+<meta name="description" content="Open-source desktop app that runs Claude Code, GitHub Copilot CLI and Antigravity as tasks on one kanban board: a git branch per task, plan first, AI review, and every agent&#x27;s tokens and quota in one place. Local, no API keys.">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0c0d0c" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f3f2ec" media="(prefers-color-scheme: light)">
+<link rel="canonical" href="https://agent-kanban.lzhgus.com/">
+<link rel="alternate" hreflang="en" href="https://agent-kanban.lzhgus.com/">
+<link rel="alternate" hreflang="zh-CN" href="https://agent-kanban.lzhgus.com/zh/">
+<link rel="alternate" hreflang="x-default" href="https://agent-kanban.lzhgus.com/">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Agent Kanban">
+<meta property="og:title" content="Agent Kanban — One board for all your coding agents">
+<meta property="og:description" content="Open-source desktop app that runs Claude Code, GitHub Copilot CLI and Antigravity as tasks on one kanban board: a git branch per task, plan first, AI review, and every agent&#x27;s tokens and quota in one place. Local, no API keys.">
+<meta property="og:url" content="https://agent-kanban.lzhgus.com/">
+<meta property="og:image" content="https://agent-kanban.lzhgus.com/og-en.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Agent Kanban — One board for all your coding agents">
+<meta name="twitter:description" content="Open-source desktop app that runs Claude Code, GitHub Copilot CLI and Antigravity as tasks on one kanban board: a git branch per task, plan first, AI review, and every agent&#x27;s tokens and quota in one place. Local, no API keys.">
+<meta name="twitter:image" content="https://agent-kanban.lzhgus.com/og-en.png">
+<link rel="preload" as="image" href="/media/poster-en.webp" fetchpriority="high">
+<link rel="stylesheet" href="/styles.css">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Agent Kanban","applicationCategory":"DeveloperApplication","operatingSystem":"macOS","license":"https://opensource.org/licenses/MIT","url":"https://agent-kanban.lzhgus.com/","codeRepository":"https://github.com/lzhgus/agent-kanban","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
+</head>
+<body class="lang-en">
+<a class="skip" href="#main">Skip to content</a>
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="/"><img src="/logo-96.png" width="28" height="28" alt=""> Agent Kanban</a>
+    <nav aria-label="Primary" class="links">
+      <a href="#features">Features</a>
+      <a href="#flow">How it works</a>
+      <a href="#start">Get started</a>
+    </nav>
+    <div class="nav-r">
+      <a class="lang" href="/zh/" hreflang="zh-CN" lang="zh-CN">中文</a>
+      <a class="btn btn-ghost btn-sm" href="https://github.com/lzhgus/agent-kanban"><svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span class="hide-s">GitHub</span></a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+<section class="hero">
+  <div class="wrap">
+    <p class="eyebrow"><span class="pulse" aria-hidden="true"></span>Open source · MIT · macOS desktop app</p>
+    <h1>One board for all your <span class="hl">coding agents</span></h1>
+    <p class="lede">Agent Kanban runs Claude Code, GitHub Copilot CLI and Antigravity as tasks on a kanban board. Each task gets its own git branch. Agents plan, review each other and ask you questions, and you see every agent's progress, tokens and plan quota in one place.</p>
+    <div class="ctas">
+      <a class="btn btn-primary" href="#start">Get started</a>
+      <a class="btn btn-ghost" href="https://github.com/lzhgus/agent-kanban"><svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16"><path fill="currentColor" d="M8 .25a.75.75 0 01.67.42l1.88 3.81 4.2.61a.75.75 0 01.42 1.28l-3.04 2.96.72 4.19a.75.75 0 01-1.09.79L8 12.33l-3.76 1.98a.75.75 0 01-1.09-.79l.72-4.19L.83 6.37a.75.75 0 01.42-1.28l4.2-.61L7.33.67A.75.75 0 018 .25z"/></svg>Star on GitHub</a>
+    </div>
+    <div class="oneliner"><span class="prompt" aria-hidden="true">$</span><code>git clone https://github.com/lzhgus/agent-kanban.git &amp;&amp; cd agent-kanban &amp;&amp; go run .</code><button class="copy" type="button" data-copy="git clone https://github.com/lzhgus/agent-kanban.git &amp;&amp; cd agent-kanban &amp;&amp; go run ." data-done="Copied">Copy</button></div>
+  </div>
+  <div class="wrap wide">
+    <figure class="stage">
+      <div class="glow" aria-hidden="true"></div>
+      <div class="frame">
+        <video id="promo" autoplay muted loop playsinline preload="metadata" poster="/media/poster-en.webp" width="1144" height="646" aria-label="20-second promo: a task goes from To Do to Running, Review and Done">
+          <source src="/media/promo-en.mp4" type="video/mp4">
+        </video>
+        <button class="vctl" type="button" id="vctl" data-pause="Pause video" data-play="Play video" aria-label="Pause video"><span class="i-pause" aria-hidden="true"></span></button>
+      </div>
+      <figcaption><a href="/demo/">Open the interactive demo →</a> <span>Fully mocked data, no real work.</span></figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="sec" id="agents" aria-labelledby="agents-h">
+  <div class="wrap">
+    <p class="kicker">Works with the CLIs you already use</p>
+    <h2 id="agents-h">Your subscriptions. Your agents. One board.</h2>
+    <p class="sub">Agent Kanban drives the agent CLIs you have installed and signed in to. No API keys, no account, no server.</p>
+    <ul class="agents"><li class="agent"><div class="ahead"><span class="adot claude" aria-hidden="true"></span><b>Claude Code</b></div><span class="adesc">Runs tasks · board tools (MCP) · quota</span><em class="tag ok">Tested</em></li><li class="agent"><div class="ahead"><span class="adot copilot" aria-hidden="true"></span><b>GitHub Copilot CLI</b></div><span class="adesc">Runs tasks · board tools (MCP) · quota</span><em class="tag beta">Being tested</em></li><li class="agent"><div class="ahead"><span class="adot anti" aria-hidden="true"></span><b>Antigravity CLI (agy)</b></div><span class="adesc">Runs tasks · quota</span><em class="tag beta">Being tested</em></li><li class="agent"><div class="ahead"><span class="adot codex" aria-hidden="true"></span><b>Codex</b></div><span class="adesc">Sessions watched read-only · quota</span><em class="tag ok">Read-only</em></li></ul>
+    <p class="status"><b>Status: early.</b> It works day to day with Claude Code. GitHub Copilot CLI and Antigravity support is implemented and being tested. Expect rough edges.</p>
+  </div>
+</section>
+
+<section class="sec" id="features" aria-labelledby="features-h">
+  <div class="wrap">
+    <p class="kicker">What it does</p>
+    <h2 id="features-h">Less terminal juggling. More shipped tasks.</h2>
+    <ul class="feats"><li class="feat"><svg class="ficon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></svg><h3>Tasks are conversations</h3><p>Start a task, then reply to ask for changes. The agent picks up where it stopped, in the same session.</p></li><li class="feat"><svg class="ficon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 5-12 3-12 7"/></svg><h3>A branch per task</h3><p>Every task works in its own worktree on a <code>kanban/&lt;id&gt;-&lt;title&gt;</code> branch. Each turn ends in a commit; review the diff and <b>Merge</b> when you're ready.</p></li><li class="feat"><svg class="ficon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6v3H9zM6 6h2m8 0h2v15H6V6"/><path d="M9 12l2 2 4-4M9 17h6"/></svg><h3>Plan first</h3><p>Start with a read-only planning turn. The plan waits for you to confirm or revise it before any code changes.</p></li><li class="feat"><svg class="ficon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5M8.5 11l2 2 3.5-3.5"/></svg><h3>AI review</h3><p>Have another agent review a plan or finished changes. The loop runs until the reviewer approves or your rounds run out. The decision stays yours.</p></li><li class="feat"><svg class="ficon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="7" rx="2"/><rect x="14" y="13" width="7" height="7" rx="2"/><path d="M10 7.5h4.5a2 2 0 0 1 2 2V13M14 16.5H9.5a2 2 0 0 1-2-2V11"/></svg><h3>Agents work together</h3><p>A built-in local MCP server lets agents ask you a question, file tasks for other agents and read the board.</p></li><li class="feat"><svg class="ficon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><h3>Usage at a glance</h3><p>Tokens and cost per task and per agent, plus each agent's plan windows (Claude's 5-hour and weekly limits, Copilot's premium requests) and when they reset.</p></li><li class="feat"><svg class="ficon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="4" rx="1.5"/><rect x="4" y="10" width="16" height="4" rx="1.5"/><rect x="4" y="16" width="10" height="4" rx="1.5"/></svg><h3>Queue</h3><p>Choose how many agents run at once. The rest wait their turn.</p></li><li class="feat"><svg class="ficon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L5 14h6l-1 7 8-11h-6z"/></svg><h3>Auto pickup</h3><p>Turn on <b>Auto</b> and free agents take To Do tasks first come, first served. A task for any agent goes to the one with the most quota left.</p></li><li class="feat"><svg class="ficon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9l3 3-3 3M12 15h5"/></svg><h3>Sessions outside the board</h3><p>Claude Code, Codex and Antigravity sessions you run in a terminal show up too, read-only, with their token usage.</p></li></ul>
+  </div>
+</section>
+
+<section class="sec" id="flow" aria-labelledby="flow-h">
+  <div class="wrap">
+    <p class="kicker">How a task flows</p>
+    <h2 id="flow-h">From idea to merged, on one board.</h2>
+    <ol class="flow"><li class="step todo"><span class="sdot" aria-hidden="true"></span><h3>To Do</h3><p>Filed, not started, or waiting for a free agent with Auto on.</p></li><li class="step run"><span class="sdot" aria-hidden="true"></span><h3>Running</h3><p>An agent is working in the task's own worktree, or Queued for a free slot.</p></li><li class="step confirm"><span class="sdot" aria-hidden="true"></span><h3>Confirm</h3><p>A plan, or an agent's question, waits for you.</p></li><li class="step review"><span class="sdot" aria-hidden="true"></span><h3>Review</h3><p>The turn is done: reply, ask for an AI review, merge, or hand it off.</p></li><li class="step done"><span class="sdot" aria-hidden="true"></span><h3>Done</h3><p>Finished. Outside sessions land here after two idle hours.</p></li></ol>
+    <p class="flow-plan">With <b>Plan first</b>: To Do → Running (plan) → Confirm → Running → Review → Done</p>
+  </div>
+</section>
+
+<section class="sec" id="privacy" aria-labelledby="privacy-h">
+  <div class="wrap">
+    <div class="band">
+      <p class="kicker">Local-first</p>
+      <h2 id="privacy-h">Everything runs on your machine.</h2>
+      <ul class="priv"><li><h3>No keys, no account, no server</h3><p>It uses the agent CLIs you're already signed in to, so your existing subscriptions just work.</p></li><li><h3>A local MCP server</h3><p>It listens on 127.0.0.1 only, and each turn gets its own URL that stops working when the turn ends.</p></li><li><h3>Your board stays yours</h3><p>The board and worktrees live in your Application Support folder. Deleting a task keeps its branch in your repository.</p></li></ul>
+      <p class="warn"><b>Heads-up:</b> agents run headless with their permission prompts turned off, inside the task's worktree. Only point them at code you trust them with. Planning and review turns are read-only.</p>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="start" aria-labelledby="start-h">
+  <div class="wrap">
+    <p class="kicker">Get started</p>
+    <h2 id="start-h">Running in a minute.</h2>
+    <p class="sub">You need macOS, <a href="https://go.dev/dl/">Go</a> 1.27.3 or newer, git, and at least one of the agent CLIs above, installed and signed in.</p>
+    <div class="starts">
+      <div><div class="code"><div class="code-head"><span>Run from source</span><button class="copy" type="button" data-copy="git clone https://github.com/lzhgus/agent-kanban.git
+cd agent-kanban
+go run ." data-done="Copied">Copy</button></div><pre><code>git clone https://github.com/lzhgus/agent-kanban.git
+cd agent-kanban
+go run .</code></pre></div><p>Click <b>New task</b>, describe what to do, pick an agent and a folder, and press <b>Add &amp; Run</b>. Tick <b>Plan first</b> to review a plan before the agent changes anything.</p></div>
+      <div><div class="code"><div class="code-head"><span>Build the app</span><button class="copy" type="button" data-copy="go run github.com/egoist/mygo/cmd/mygo build -skip-dmg
+cp -R &quot;build/darwin-arm64/Agent Kanban.app&quot; /Applications/" data-done="Copied">Copy</button></div><pre><code>go run github.com/egoist/mygo/cmd/mygo build -skip-dmg
+cp -R &quot;build/darwin-arm64/Agent Kanban.app&quot; /Applications/</code></pre></div><p>Keep it in Applications and open it from the Dock or Spotlight. The app and <code>go run .</code> share the same board. Linux should work but is untested; Windows isn't supported yet.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="cta">
+      <img src="/logo-96.png" width="64" height="64" alt="" loading="lazy">
+      <h2>Free and open source.</h2>
+      <p>MIT licensed. Read the code, file an issue, or send a pull request. A star helps other people find it.</p>
+      <div class="ctas">
+        <a class="btn btn-primary" href="https://github.com/lzhgus/agent-kanban"><svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16"><path fill="currentColor" d="M8 .25a.75.75 0 01.67.42l1.88 3.81 4.2.61a.75.75 0 01.42 1.28l-3.04 2.96.72 4.19a.75.75 0 01-1.09.79L8 12.33l-3.76 1.98a.75.75 0 01-1.09-.79l.72-4.19L.83 6.37a.75.75 0 01.42-1.28l4.2-.61L7.33.67A.75.75 0 018 .25z"/></svg>Star on GitHub</a>
+        <a class="btn btn-ghost" href="https://github.com/lzhgus/agent-kanban#readme">Read the README</a>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <a class="brand" href="/"><img src="/logo-96.png" width="22" height="22" alt="" loading="lazy"> Agent Kanban</a>
+    <p>Built with <a href="https://github.com/egoist/mygo">MyGo</a>, a native UI in pure Go.</p>
+    <nav aria-label="Footer">
+      <a href="https://github.com/lzhgus/agent-kanban">GitHub</a>
+      <a href="https://github.com/lzhgus/agent-kanban/blob/main/LICENSE">MIT License</a>
+      <a href="/demo/">Demo</a>
+      <a href="/zh/" hreflang="zh-CN" lang="zh-CN">中文</a>
+    </nav>
+  </div>
+</footer>
+<script src="/site.js" defer></script>
+</body>
+</html>

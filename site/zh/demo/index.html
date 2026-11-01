@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<meta name="color-scheme" content="light dark"/>
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"/>
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
+<meta name="description" content="Agent Kanban 20 秒演示动画（全部为模拟数据）：一个看板管所有 coding agent。"/>
+<link rel="canonical" href="https://agent-kanban.lzhgus.com/zh/demo/"/>
+<link rel="alternate" hreflang="en" href="https://agent-kanban.lzhgus.com/demo/"/>
+<link rel="alternate" hreflang="zh-CN" href="https://agent-kanban.lzhgus.com/zh/demo/"/>
+<title>Agent Kanban — 20 秒演示</title>
+<style>
+:root{
+  --page:#0e100f; --page2:#171917; --panel:#1c1f1c; --line:rgba(255,255,255,.09);
+  --ink:#f2f3ef; --muted:#9aa39c; --lime:#c8f169; --lime-d:#a8d94e;
+  --board:#ecece7; --board-side:#e9e9e3; --col:#f4f4f0; --card:#fff; --card-ink:#171917; --card-sub:#7a7d78;
+  --claude:#d96c47; --codex:#2f7fc1; --anti:#5da13a; --copilot:#7a5af8;
+}
+@media (prefers-color-scheme: light){
+  :root{ --page:#e8e9e2; --page2:#f2f2ec; --panel:#fff; --line:rgba(0,0,0,.08); --ink:#171917; --muted:#6b706a; }
+}
+*{box-sizing:border-box} body{margin:0;background:var(--page);color:var(--ink);font-family:Outfit,system-ui,-apple-system,Segoe UI,sans-serif;}
+a{color:inherit}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 18px 28px}
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+.top h1{margin:0;font-size:28px;letter-spacing:-.02em;line-height:1}
+.top h1 span{color:#7fb52e}
+.top p{margin:6px 0 0;color:var(--muted);font-size:14.5px}
+.badge{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--line);padding:7px 10px;border-radius:999px;background:var(--panel);display:flex;gap:8px;align-items:center}
+.dotlive{width:7px;height:7px;border-radius:50%;background:#ff5a4e;box-shadow:0 0 0 4px rgba(255,90,78,.15);animation:pulse 1.6s infinite}
+@keyframes pulse{50%{opacity:.4}}
+
+/* STAGE */
+.stage{position:relative;background:#0a0b0a;border-radius:18px;padding:14px;box-shadow:0 20px 50px rgba(0,0,0,.35);overflow:hidden}
+.stage-head{display:flex;justify-content:space-between;align-items:center;color:#c9cdc6;font-size:12px;font-family:"JetBrains Mono",monospace;letter-spacing:.04em;padding:2px 4px 10px}
+.scene-pill{background:#222622;border:1px solid rgba(255,255,255,.08);padding:6px 10px;border-radius:999px;color:#e8eae5}
+.scene-pill b{color:var(--lime)}
+.viewport{position:relative;width:100%;overflow:hidden;background:var(--board);border-radius:12px;aspect-ratio: 1100 / 640;}
+@media(max-width:700px){.stage-head .fname{display:none}.stage-head{flex-wrap:nowrap}.scene-pill{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:62vw}.stage-head #clock{white-space:nowrap}}
+.scaler{position:absolute;left:0;top:0;width:1100px;height:640px;transform-origin:top left}
+
+/* BOARD */
+.board{width:1100px;height:640px;background:var(--board);display:flex;font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:var(--card-ink);position:relative;overflow:hidden}
+.sidebar{width:238px;flex:0 0 238px;background:var(--board-side);padding:16px 14px;display:flex;flex-direction:column;gap:12px;border-right:1px solid rgba(0,0,0,.04)}
+.traffic{display:flex;gap:7px}.traffic i{width:11px;height:11px;border-radius:50%;display:block}.traffic i:nth-child(1){background:#ff5f57}.traffic i:nth-child(2){background:#febc2e}.traffic i:nth-child(3){background:#28c840}
+.brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:15px}
+.brandmark{width:26px;height:26px;border-radius:7px;background:var(--lime);display:grid;place-items:center;font-family:"JetBrains Mono",monospace;font-size:13px;font-weight:800}
+.newbtn{background:var(--lime);border:none;border-radius:9px;padding:11px;font-weight:700;font-size:13.5px;cursor:pointer;position:relative;transition:.2s}
+.newbtn.ringing{box-shadow:0 0 0 0 rgba(168,217,78,.7);animation:ring 1s infinite}
+@keyframes ring{70%{box-shadow:0 0 0 12px rgba(168,217,78,0)}100%{box-shadow:0 0 0 0 rgba(168,217,78,0)}}
+.label{font-size:10px;letter-spacing:.14em;color:#8a8c86;font-weight:700;margin-top:4px}
+.agentrow{background:transparent;border-radius:10px;padding:9px 10px}
+.agentrow.active{background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.agentrow .r1{display:flex;align-items:center;gap:7px;font-weight:700;font-size:13.5px}
+.agentrow .r1 span:last-child{margin-left:auto;color:#8a8c86;font-weight:500;font-size:12px}
+.adot{width:8px;height:8px;border-radius:50%}
+.tok{font-size:11.5px;color:#8a8c86;margin:3px 0 0 15px;font-family:"JetBrains Mono",monospace}
+.meter{height:5px;background:#dddcd4;border-radius:99px;overflow:hidden;margin:6px 0 0 15px}.meter i{display:block;height:100%;background:#6a9a2e;border-radius:99px}
+.sidefoot{margin-top:auto;font-size:11.5px;color:#7d7f7a;line-height:1.5;border-top:1px solid rgba(0,0,0,.06);padding-top:10px}
+.main{flex:1;padding:16px 16px 14px;min-width:0}
+.mainhead{display:flex;align-items:baseline;gap:10px;margin-bottom:12px}
+.mainhead b{font-size:16px}.mainhead span{color:#8a8c86;font-size:12.5px}
+.cols{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;height:556px}
+.col{background:var(--col);border-radius:12px;padding:12px 10px;display:flex;flex-direction:column;gap:9px;transition:box-shadow .3s, background .3s}
+.col.highlight{box-shadow:inset 0 0 0 2px var(--lime-d);background:#f7f9ec}
+.colhead{display:flex;align-items:center;gap:7px;font-weight:700;font-size:13.5px;padding:0 2px}
+.colhead .cnt{color:#8a8c86;font-weight:500}
+.colhead .plus{margin-left:auto;color:#555;font-size:16px}
+.cdot{width:8px;height:8px;border-radius:50%}
+.empty{color:#a3a59e;font-size:12.5px;padding:8px 4px}
+.card{background:var(--card);border-radius:11px;padding:11px 12px;box-shadow:0 1px 3px rgba(0,0,0,.07);border:1px solid rgba(0,0,0,.03)}
+.card .who{display:flex;justify-content:space-between;font-size:11.5px;font-weight:700}
+.card .who time{color:#a3a59e;font-weight:500}
+.card h4{margin:5px 0 6px;font-size:13.5px;line-height:1.35}
+.meta{font-size:11px;color:var(--card-sub);font-family:"JetBrains Mono",monospace;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.pill{font-size:10px;font-weight:700;padding:3px 7px;border-radius:999px;background:#eef3dc;color:#4c6b12}
+.pill.blue{background:#e6f0fb;color:#245a8a}.pill.purple{background:#efeaff;color:#5b3ec8}.pill.green{background:#e3f4e3;color:#1d6b2e}
+
+/* HERO CARD extras */
+#heroCard{position:relative;z-index:3}
+#heroCard .branch{margin-top:8px}
+.progresswrap{margin-top:10px;display:none}
+.progresswrap.show{display:block}
+.prow{display:flex;justify-content:space-between;font-size:11px;color:#6f726c;font-family:"JetBrains Mono",monospace}
+.bar{height:7px;background:#e9e9e2;border-radius:99px;overflow:hidden;margin-top:5px}
+.bar i{display:block;height:100%;width:0%;background:linear-gradient(90deg,#8ec63f,#c8f169);border-radius:99px}
+.steps{margin-top:9px;display:none;flex-direction:column;gap:5px}
+.steps.show{display:flex}
+.step{font-size:11.5px;color:#8a8c86;display:flex;gap:7px;align-items:center}
+.step.done{color:#2f3a1e}.step .box{width:15px;height:15px;border-radius:4px;border:1.5px solid #cfd0c8;display:grid;place-items:center;font-size:10px;flex:0 0 15px;background:#fff}
+.step.done .box{background:var(--lime);border-color:var(--lime-d);color:#1c2a00}
+.step.active{color:#171917;font-weight:600}.step.active .box{border-color:#8ec63f}
+.reviewbox{margin-top:10px;display:none;background:#f7f8f3;border:1px solid #e6e8dd;border-radius:8px;padding:8px 9px}
+.reviewbox.show{display:block}
+.reviewbox .rv{font-size:11.5px;display:flex;gap:6px;margin:3px 0}
+.mergepill{display:none;margin-top:9px;background:#12240f;color:#c8f169;font-weight:700;font-size:11.5px;padding:7px 9px;border-radius:7px;align-items:center;gap:7px}
+.mergepill.show{display:flex}
+
+/* Composer */
+.composer{display:none;background:#fff;border:1.5px solid #b9d97a;border-radius:11px;padding:11px 12px;box-shadow:0 8px 20px rgba(0,0,0,.10)}
+.composer.show{display:block;animation:pop .35s cubic-bezier(.2,1.4,.4,1)}
+@keyframes pop{from{transform:scale(.92) translateY(-6px);opacity:0}}
+.composer .ct{font-size:11px;letter-spacing:.08em;color:#8a8c86;font-weight:700}
+.typed{font-size:14px;font-weight:700;margin:6px 0 8px;min-height:20px}
+.caret{display:inline-block;width:2px;height:15px;background:#171917;vertical-align:-2px;animation:blink .7s infinite}
+@keyframes blink{50%{opacity:0}}
+.assign{display:flex;gap:6px;flex-wrap:wrap}
+
+/* Cursor */
+.cursor{position:absolute;width:22px;height:22px;z-index:20;pointer-events:none;opacity:0;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3));transition:opacity .2s}
+.cursor.show{opacity:1}
+.clickring{position:absolute;width:28px;height:28px;border:2px solid #7fb52e;border-radius:50%;z-index:19;pointer-events:none;opacity:0}
+.clickring.go{animation:clicka .6s ease-out}
+@keyframes clicka{0%{transform:scale(.4);opacity:1}100%{transform:scale(1.6);opacity:0}}
+
+/* Overlays */
+.overlay{position:absolute;inset:0;z-index:30;display:grid;place-items:center;text-align:center;pointer-events:none;opacity:0;transition:opacity .45s}
+.overlay.show{opacity:1}
+.hook{background:rgba(14,16,14,.88);backdrop-filter:blur(3px);color:#fff;padding:30px}
+.hook .kicker{font-family:"JetBrains Mono",monospace;font-size:12px;letter-spacing:.18em;color:var(--lime);text-transform:uppercase}
+.hook h2{font-size:54px;line-height:1.05;margin:14px 0 12px;letter-spacing:-.03em}
+.hook h2 em{font-style:normal;color:var(--lime)}
+.hook p{color:#c6cbc2;margin:0;font-size:16px}
+.agentpills{display:flex;gap:8px;justify-content:center;margin-top:20px;flex-wrap:wrap}
+.agentpills span{background:#1e211e;border:1px solid rgba(255,255,255,.12);padding:8px 12px;border-radius:999px;font-size:13px;font-weight:700;display:flex;gap:7px;align-items:center}
+.outro{background:linear-gradient(180deg,rgba(14,16,14,.25),rgba(14,16,14,.92) 55%);color:#fff;align-items:end;padding:28px}
+.outrocard{margin-bottom:8px}
+.outrocard .logo{font-size:30px;font-weight:800}.outrocard .logo span{color:var(--lime)}
+.repolink{display:inline-flex;gap:9px;align-items:center;background:#fff;color:#111;padding:11px 16px;border-radius:999px;font-family:"JetBrains Mono",monospace;font-size:13.5px;font-weight:600;text-decoration:none;margin-top:12px}
+.outro p{color:#c9cdc6;font-size:13.5px;margin:10px 0 0}
+
+/* Caption */
+.caption{position:absolute;left:50%;transform:translateX(-50%);bottom:14px;z-index:25;background:rgba(10,11,10,.88);color:#fff;padding:9px 16px;border-radius:999px;font-size:14px;font-weight:600;white-space:nowrap;box-shadow:0 8px 20px rgba(0,0,0,.25)}
+.caption b{color:var(--lime)}
+
+/* Controls */
+.controls{margin-top:14px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.trackwrap{position:relative;padding-top:2px}
+.track{height:10px;background:rgba(127,127,127,.18);border-radius:99px;position:relative;cursor:pointer;overflow:visible}
+.fill{height:100%;width:0%;background:linear-gradient(90deg,#7fb52e,var(--lime));border-radius:99px;position:relative}
+.fill::after{content:"";position:absolute;right:-6px;top:50%;transform:translateY(-50%);width:16px;height:16px;background:#fff;border:3px solid #7fb52e;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,.25)}
+.mark{position:absolute;top:-3px;width:2px;height:16px;background:rgba(127,127,127,.5)}
+.segs{display:grid;grid-template-columns:3fr 5fr 6fr 6fr;gap:0;margin-top:8px;font-size:11.5px;color:var(--muted)}
+.segs div{padding-right:8px}.segs b{display:block;color:var(--ink);font-size:12px}
+.segs div.active b{color:#7fb52e}
+.btnrow{display:flex;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:var(--page2);color:var(--ink);padding:10px 16px;border-radius:999px;font-weight:700;font-size:14px;cursor:pointer;display:inline-flex;gap:8px;align-items:center}
+.btn.primary{background:#171917;color:#fff;border-color:#171917}
+@media(prefers-color-scheme:light){.btn.primary{background:#171917}}
+.btn:hover{transform:translateY(-1px)}
+.time{font-family:"JetBrains Mono",monospace;font-size:13px;color:var(--muted);margin-left:auto}
+.looptag{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.stamps{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+.stamp{border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:12px}
+.stamp b{font-size:13px}.stamp p{margin:4px 0 0;color:var(--muted);font-size:12.5px;line-height:1.5}
+.stamp .t{font-family:"JetBrains Mono",monospace;color:#7fb52e;font-size:11px;font-weight:700}
+.note{margin-top:12px;color:var(--muted);font-size:12.5px;line-height:1.6}
+@media(max-width:700px){.top h1{font-size:23px}.hook h2{font-size:34px}.stamps{grid-template-columns:1fr 1fr}.segs{font-size:10.5px}.caption{font-size:12px;max-width:92%;white-space:normal;text-align:center}}
+@media (prefers-reduced-motion: reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p style="margin:0 0 14px;font-size:14px"><a href="/zh/" style="color:var(--muted);text-decoration:none">← Agent Kanban 首页</a> &nbsp;·&nbsp; <a href="/demo/" lang="en" style="color:var(--muted)">English</a></p>
+  <div class="top">
+    <div>
+      <h1>Agent Kanban <span>· 20 秒宣传动画</span></h1>
+      <p>全 mock 演示：假任务、假工作区、假 token —— 不含任何真实截图或真实工作数据。</p>
+    </div>
+    <div class="badge"><span class="dotlive"></span> Mock Demo · 20s · Loop</div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-head"><span class="scene-pill" id="scenePill"><b>01 / HOOK</b> &nbsp;一个看板管所有 coding agent</span><span class="fname">AGENT-KANBAN_PROMO_20S</span><span id="clock">00:00 / 00:20</span></div>
+
+    <div class="viewport" id="viewport">
+      <div class="scaler" id="scaler">
+        <div class="board" id="board">
+          <!-- Sidebar -->
+          <aside class="sidebar">
+            <div class="traffic"><i></i><i></i><i></i></div>
+            <div class="brand"><span class="brandmark">|▎</span> Agent Kanban</div>
+            <button class="newbtn" id="newBtn">＋ New task</button>
+            <div class="label">AGENTS</div>
+            <div class="agentrow active"><div class="r1"><span style="font-family:monospace">|▎</span> All agents <span>6</span></div><div class="tok" id="allTok">128.0k tokens</div></div>
+            <div class="agentrow" id="rowClaude"><div class="r1"><span class="adot" style="background:var(--claude)"></span> claude <span>3</span></div><div class="tok" id="claudeTok">64.0k tokens</div><div class="meter"><i style="width:42%"></i></div></div>
+            <div class="agentrow"><div class="r1"><span class="adot" style="background:var(--codex)"></span> codex <span>2</span></div><div class="tok">38.5k tokens</div><div class="meter"><i style="width:28%"></i></div></div>
+            <div class="agentrow"><div class="r1"><span class="adot" style="background:var(--anti)"></span> antigravity <span>1</span></div><div class="tok">16.2k tokens</div><div class="meter"><i style="width:18%"></i></div></div>
+            <div class="agentrow"><div class="r1"><span class="adot" style="background:var(--copilot)"></span> copilot <span>0</span></div><div class="tok">9.3k tokens</div></div>
+            <div class="sidefoot"><span style="color:#5da13a">●</span> Watching Claude Code, Codex &amp; Antigravity<br><br>Agents at once &nbsp;<b style="color:#171917">3</b></div>
+          </aside>
+
+          <!-- Main -->
+          <section class="main">
+            <div class="mainhead"><b>All agents</b><span id="runStatus">1 running · 2 need you</span></div>
+            <div class="cols">
+              <div class="col" id="colTodo">
+                <div class="colhead"><span class="cdot" style="background:#2f7fc1"></span> To Do <span class="cnt" id="cntTodo">0</span><span class="plus">+</span></div>
+                <div class="composer" id="composer">
+                  <div class="ct">NEW TASK · DEMO-APP</div>
+                  <div class="typed"><span id="typedText"></span><span class="caret"></span></div>
+                  <div class="assign"><span class="pill">Assign: claude</span><span class="pill blue">Branch: feat/dark-mode</span></div>
+                </div>
+                <div class="empty" id="todoEmpty">Double-click to add a task</div>
+                <div id="todoSlot"></div>
+              </div>
+
+              <div class="col" id="colRunning">
+                <div class="colhead"><span class="cdot" style="background:#5da13a"></span> Running <span class="cnt" id="cntRun">1</span></div>
+                <div class="empty" id="runEmpty" style="display:none">Nothing here</div>
+                <div id="runSlot"></div>
+                <div class="card" style="opacity:.92"><div class="who"><span style="color:var(--anti)">● antigravity</span><time>4m</time></div><h4>Generate app icons</h4><div class="meta">◉ demo-app · 8.1k tok</div><div class="bar" style="margin-top:8px"><i style="width:64%;background:#8ec63f"></i></div></div>
+              </div>
+
+              <div class="col" id="colReview">
+                <div class="colhead"><span class="cdot" style="background:#c4900a"></span> Review <span class="cnt" id="cntReview">2</span></div>
+                <div id="reviewSlot"></div>
+                <div class="card"><div class="who"><span style="color:var(--copilot)">● copilot</span><time>6m</time></div><h4>Write API docs</h4><div class="meta">◉ docs-site · 12.0k tok</div></div>
+                <div class="card"><div class="who"><span style="color:var(--codex)">● codex</span><time>12m</time></div><h4>Refactor auth utils</h4><div class="meta">◉ demo-app · 21.5k tok</div></div>
+              </div>
+
+              <div class="col" id="colDone">
+                <div class="colhead"><span class="cdot" style="background:#8a8c86"></span> Done <span class="cnt" id="cntDone">3</span></div>
+                <div id="doneSlot"></div>
+                <div class="card"><div class="who"><span style="color:var(--claude)">● claude</span><time>1h</time></div><h4>Fix login redirect</h4><div class="meta">◉ demo-app · 9.8k tok</div></div>
+                <div class="card"><div class="who"><span style="color:var(--codex)">● codex</span><time>2h</time></div><h4>Add search filter</h4><div class="meta">◉ demo-app · 14.2k tok</div></div>
+                <div class="card"><div class="who"><span style="color:var(--copilot)">● copilot</span><time>3h</time></div><h4>Update README badges</h4><div class="meta">◉ docs-site · 3.6k tok</div></div>
+              </div>
+            </div>
+
+            <!-- HERO CARD (single element, FLIP-moved between columns) -->
+            <template id="heroTpl"></template>
+          </section>
+
+          <svg class="cursor" id="cursor" viewBox="0 0 24 24" fill="none"><path d="M4 2 L20 12 L12.5 13.5 L9 21 Z" fill="#111" stroke="#fff" stroke-width="1.6"/></svg>
+          <div class="clickring" id="clickRing"></div>
+
+          <!-- Hook overlay -->
+          <div class="overlay hook" id="hookOverlay">
+            <div>
+              <div class="kicker">Agent Kanban — Open Source</div>
+              <h2>一个看板<br>管所有 <em>coding agent</em></h2>
+              <p>Claude Code · Codex · Copilot · Antigravity —— 不再开一堆终端来回切。</p>
+              <div class="agentpills"><span><i class="adot" style="background:var(--claude)"></i>claude</span><span><i class="adot" style="background:var(--codex)"></i>codex</span><span><i class="adot" style="background:var(--anti)"></i>antigravity</span><span><i class="adot" style="background:var(--copilot)"></i>copilot</span></div>
+            </div>
+          </div>
+
+          <!-- Outro overlay -->
+          <div class="overlay outro" id="outroOverlay">
+            <div class="outrocard">
+              <div class="logo">Agent <span>Kanban</span></div>
+              <span class="repolink">⌘ github.com/lzhgus/agent-kanban</span>
+              <p>一个看板，跑完整个流程：To Do → Running → Review → Done &amp; Merge</p>
+            </div>
+          </div>
+
+          <div class="caption" id="caption">一个看板，管所有 coding agent</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <div class="trackwrap">
+      <div class="track" id="track">
+        <div class="fill" id="fill"></div>
+        <div class="mark" style="left:15%"></div><div class="mark" style="left:40%"></div><div class="mark" style="left:70%"></div>
+      </div>
+      <div class="segs">
+        <div id="seg0"><b>0–3s · 钩子</b>一个看板管所有 agent</div>
+        <div id="seg1"><b>3–8s · 新建任务</b>任务进 To Do</div>
+        <div id="seg2"><b>8–14s · Agent 执行</b>Running · 进度 · Token</div>
+        <div id="seg3"><b>14–20s · Review &amp; Merge</b>通过 → Done → 合并</div>
+      </div>
+    </div>
+    <div class="btnrow">
+      <button class="btn primary" id="playBtn">⏸ 暂停</button>
+      <button class="btn" id="replayBtn">↺ 重播</button>
+      <button class="btn" id="skipBtn">⏭ 跳到 Review</button>
+      <a class="btn" href="https://github.com/lzhgus/agent-kanban" target="_blank" rel="noopener" style="text-decoration:none">⌘ GitHub 仓库 ↗</a>
+      <span class="looptag">🔁 循环播放已开启 · 播完自动重头</span>
+      <span class="time" id="timeLabel">0.0s / 20.0s</span>
+    </div>
+  </div>
+
+  <div class="stamps">
+    <div class="stamp"><div class="t">00:00 — 00:03</div><b>钩子</b><p>先讲清卖点：不用再盯着多个终端，一个看板全管。</p></div>
+    <div class="stamp"><div class="t">00:03 — 00:08</div><b>新建任务</b><p>点 New task，输入 “Add dark mode toggle”，指定 agent 与独立分支。</p></div>
+    <div class="stamp"><div class="t">00:08 — 00:14</div><b>接单执行</b><p>claude 接单进 Running，步骤逐项完成，进度与 token 实时上涨。</p></div>
+    <div class="stamp"><div class="t">00:14 — 00:20</div><b>Review &amp; Merge</b><p>codex 交叉 review，LGTM 后进 Done 并 merge 到 main，收尾放仓库链接。</p></div>
+  </div>
+  <p class="note">说明：本页是代码渲染的合成演示（不是录屏）。出镜任务 “Add dark mode toggle / Fix login redirect / Write API docs”、工作区 “demo-app / docs-site”、分支 “feat/dark-mode” 与全部 token 数字均为虚构的圆整 mock 值，与真实使用记录无关。</p>
+</div>
+
+<!-- Hero card node created once -->
+<div id="heroHost" style="display:none">
+  <div class="card" id="heroCard">
+    <div class="who"><span id="heroWho" style="color:var(--claude)">● claude</span><time id="heroTime">now</time></div>
+    <h4>Add dark mode toggle</h4>
+    <div class="meta">◉ demo-app · <span id="heroTok">0 tok</span></div>
+    <div class="meta branch"><span class="pill blue">⎇ feat/dark-mode</span><span class="pill" id="heroStatePill">Queued</span></div>
+    <div class="progresswrap" id="progressWrap">
+      <div class="prow"><span>Progress</span><span id="pctLabel">0%</span></div>
+      <div class="bar"><i id="heroBar"></i></div>
+      <div class="steps" id="steps">
+        <div class="step" data-step="0"><span class="box">✓</span> Reading project files</div>
+        <div class="step" data-step="1"><span class="box">✓</span> Editing Theme.tsx + tokens.css</div>
+        <div class="step" data-step="2"><span class="box">✓</span> Running tests · 24 passed</div>
+      </div>
+    </div>
+    <div class="reviewbox" id="reviewBox">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.06em;color:#7a7d78">REVIEW BY CODEX</div>
+      <div class="rv">✅ Tests pass &nbsp;·&nbsp; ✅ No conflicts</div>
+      <div class="rv" id="lgtmLine" style="opacity:.25">💬 “LGTM — clean diff, ship it.”</div>
+    </div>
+    <div class="mergepill" id="mergePill">⎇ Merged into main · PR #42</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var DUR=20000, paused=false, offset=0, lastNow=null, pendingSeek=null;
+  var viewport=document.getElementById('viewport'), scaler=document.getElementById('scaler');
+  var hero=document.getElementById('heroCard');
+  var slots={todo:document.getElementById('todoSlot'), run:document.getElementById('runSlot'), review:document.getElementById('reviewSlot'), done:document.getElementById('doneSlot')};
+  var currentSlot=null;
+  function fit(){ var w=viewport.clientWidth; var s=w/1100; scaler.style.transform='scale('+s+')'; viewport.style.height=(640*s)+'px'; }
+  window.addEventListener('resize',fit);
+
+  function flipTo(slotName){
+    if(currentSlot===slotName) return;
+    var target=slots[slotName]; if(!target) return;
+    var first=hero.getBoundingClientRect();
+    target.appendChild(hero); currentSlot=slotName;
+    var last=hero.getBoundingClientRect();
+    if(first.width){
+      var dx=first.left-last.left, dy=first.top-last.top;
+      hero.animate([{transform:'translate('+dx+'px,'+dy+'px) scale(1.03)', boxShadow:'0 14px 30px rgba(0,0,0,.18)'},{transform:'translate(0,0) scale(1)', boxShadow:'0 1px 3px rgba(0,0,0,.07)'}],{duration:650,easing:'cubic-bezier(.2,.9,.25,1)'});
+    }
+  }
+  function fmtTok(n){ return n>=1000 ? (n/1000).toFixed(1)+'k tok' : Math.round(n)+' tok'; }
+  function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+  function ease(t){return 1-Math.pow(1-t,3)}
+  var FULL_TEXT='Add dark mode toggle';
+
+  var els={
+    hook:document.getElementById('hookOverlay'), outro:document.getElementById('outroOverlay'),
+    caption:document.getElementById('caption'), pill:document.getElementById('scenePill'),
+    clock:document.getElementById('clock'), fill:document.getElementById('fill'), time:document.getElementById('timeLabel'),
+    composer:document.getElementById('composer'), typed:document.getElementById('typedText'),
+    todoEmpty:document.getElementById('todoEmpty'), runEmpty:document.getElementById('runEmpty'),
+    newBtn:document.getElementById('newBtn'), cursor:document.getElementById('cursor'), ring:document.getElementById('clickRing'),
+    cntTodo:document.getElementById('cntTodo'), cntRun:document.getElementById('cntRun'), cntReview:document.getElementById('cntReview'), cntDone:document.getElementById('cntDone'),
+    runStatus:document.getElementById('runStatus'), heroTok:document.getElementById('heroTok'), heroTime:document.getElementById('heroTime'),
+    heroWho:document.getElementById('heroWho'), statePill:document.getElementById('heroStatePill'),
+    progWrap:document.getElementById('progressWrap'), heroBar:document.getElementById('heroBar'), pct:document.getElementById('pctLabel'),
+    steps:document.getElementById('steps'), reviewBox:document.getElementById('reviewBox'), lgtm:document.getElementById('lgtmLine'), merge:document.getElementById('mergePill'),
+    claudeTok:document.getElementById('claudeTok'), allTok:document.getElementById('allTok'),
+    colTodo:document.getElementById('colTodo'), colRun:document.getElementById('colRunning'), colReview:document.getElementById('colReview'), colDone:document.getElementById('colDone'),
+    rowClaude:document.getElementById('rowClaude')
+  };
+  var stepEls=document.querySelectorAll('#steps .step');
+  var segs=[document.getElementById('seg0'),document.getElementById('seg1'),document.getElementById('seg2'),document.getElementById('seg3')];
+
+  var lastPhase=-1;
+  function render(now){
+    if(lastNow==null) lastNow=now;
+    var dt=now-lastNow; lastNow=now;
+    if(pendingSeek!=null){ offset=pendingSeek; pendingSeek=null; }
+    else if(!paused){ offset+=dt; }
+    var t=offset%DUR; var s=t/1000;
+    // progress UI
+    els.fill.style.width=(t/DUR*100)+'%';
+    els.time.textContent=s.toFixed(1)+'s / 20.0s';
+    els.clock.textContent='00:'+String(Math.floor(s)).padStart(2,'0')+' / 00:20';
+    var phase= s<3?0 : s<8?1 : s<14?2 : 3;
+    segs.forEach(function(el,i){ el.classList.toggle('active', i===phase); });
+    if(phase!==lastPhase){
+      lastPhase=phase;
+      var info=[
+        '<b>01 / HOOK</b> &nbsp;一个看板管所有 coding agent','<b>02 / NEW TASK</b> &nbsp;新建任务 → To Do',
+        '<b>03 / RUNNING</b> &nbsp;Agent 接单 · 进度 + Token','<b>04 / REVIEW → DONE</b> &nbsp;交叉 Review · Merge'][phase];
+      els.pill.innerHTML=info;
+      els.caption.innerHTML=[
+        '一个看板，管所有 <b>coding agent</b>',
+        '新建任务 → 进入 <b>To Do</b>',
+        '<b>claude</b> 接单中 — 进度与 token 实时上涨',
+        '<b>codex</b> review 通过 → <b>Done</b> 并 merge'][phase];
+      [els.colTodo,els.colRun,els.colReview,els.colDone].forEach(function(c){c.classList.remove('highlight')});
+      if(phase===1) els.colTodo.classList.add('highlight');
+      if(phase===2) els.colRun.classList.add('highlight');
+      if(phase===3) els.colReview.classList.add('highlight');
+    }
+
+    // HOOK 0-3
+    els.hook.classList.toggle('show', s<2.7);
+    els.hook.style.opacity= s<2.4?1: Math.max(0,1-(s-2.4)/0.3);
+
+    // Cursor 3.0-4.2 moving to New task (board coords approx: sidebar button at x~125 y~118)
+    var showCursor = s>=2.9 && s<4.4;
+    els.cursor.classList.toggle('show', showCursor);
+    if(showCursor){
+      var p=clamp((s-2.9)/0.9,0,1); var e=ease(p);
+      var x=560+(125-560)*e, y=320+(118-320)*e;
+      els.cursor.style.left=x+'px'; els.cursor.style.top=y+'px';
+      if(s>=3.78 && s<3.86){ els.ring.style.left=(x-3)+'px'; els.ring.style.top=(y-3)+'px'; els.ring.classList.remove('go'); void els.ring.offsetWidth; els.ring.classList.add('go'); }
+    }
+    els.newBtn.classList.toggle('ringing', s>=3.0 && s<3.9);
+
+    // Composer 3.9-6.9, typing 4.2-6.2
+    els.composer.classList.toggle('show', s>=3.9 && s<6.9);
+    if(s>=4.2 && s<6.9){ var chars=Math.floor(clamp((s-4.2)/2,0,1)*FULL_TEXT.length); els.typed.textContent=FULL_TEXT.slice(0,chars); }
+    else if(s>=6.9){ els.typed.textContent=FULL_TEXT; }
+
+    // Hero in To Do 6.6-8.4
+    if(s>=6.6 && s<8.4){
+      hero.style.display='block'; flipTo('todo');
+      els.todoEmpty.style.display='none'; els.cntTodo.textContent='1';
+      els.statePill.textContent='Queued'; els.progWrap.classList.remove('show'); els.steps.classList.remove('show');
+      els.reviewBox.classList.remove('show'); els.merge.classList.remove('show');
+      els.heroTok.textContent='0 tok'; els.heroWho.innerHTML='● claude'; els.heroWho.style.color='var(--claude)';
+    }
+    if(s<6.6){ hero.style.display='none'; if(currentSlot){currentSlot=null;} els.todoEmpty.style.display='block'; els.cntTodo.textContent='0'; els.cntRun.textContent='1'; els.cntReview.textContent='2'; els.cntDone.textContent='3'; els.runStatus.textContent='1 running · 2 need you'; els.reviewBox.classList.remove('show'); els.merge.classList.remove('show'); els.claudeTok.textContent='64.0k tokens'; els.allTok.textContent='128.0k tokens'; els.lgtm.style.opacity=.25; }
+
+    // Running 8.4-14
+    if(s>=8.4 && s<14.2){
+      flipTo('run'); els.todoEmpty.style.display='block'; els.cntTodo.textContent='0'; els.cntRun.textContent='2'; els.runEmpty.style.display='none';
+      els.runStatus.textContent='2 running · 2 need you'; els.rowClaude.classList.add('active');
+      els.statePill.textContent='Running'; els.progWrap.classList.add('show'); els.steps.classList.add('show'); els.reviewBox.classList.remove('show'); els.merge.classList.remove('show');
+      var rp=ease(clamp((s-8.8)/4.8,0,1)); var pctVal=Math.round(rp*92);
+      els.heroBar.style.width=pctVal+'%'; els.pct.textContent=pctVal+'%';
+      var tok=rp*38600; els.heroTok.textContent=fmtTok(tok);
+      els.claudeTok.textContent=(64+tok/1000).toFixed(1)+'k tokens'; els.allTok.textContent=(128+tok/1000).toFixed(1)+'k tokens';
+      els.heroTime.textContent= Math.max(1,Math.round((s-8.4)))+'m';
+      stepEls.forEach(function(st,i){ var th=[0.12,0.45,0.82][i]; st.classList.toggle('done', rp>th+0.12); st.classList.toggle('active', rp>th && rp<=th+0.12); var box=st.querySelector('.box'); box.textContent= rp>th+0.12?'✓':(i+1); });
+    }
+    // Review 14.2-17.4
+    if(s>=14.2 && s<17.6){
+      flipTo('review'); els.cntRun.textContent='1'; els.runEmpty.style.display='none'; els.cntReview.textContent='3';
+      els.runStatus.textContent='1 running · 3 need you'; els.heroBar.style.width='100%'; els.pct.textContent='100%'; els.heroTok.textContent='42.0k tok'; els.claudeTok.textContent='106.0k tokens'; els.allTok.textContent='170.0k tokens';
+      els.statePill.textContent='In Review'; els.reviewBox.classList.add('show'); els.lgtm.style.opacity= s>=15.6?1:.25;
+      els.heroWho.innerHTML='● codex <span style="color:#8a8c86;font-weight:500">reviewing</span>'; els.heroWho.style.color='var(--codex)';
+    }
+    // Done + merge 17.6-20
+    if(s>=17.6){
+      flipTo('done'); els.cntReview.textContent='2'; els.cntDone.textContent='4'; els.runStatus.textContent='1 running · 2 need you'; els.colReview.classList.remove('highlight'); els.colDone.classList.add('highlight');
+      els.statePill.textContent='Done'; els.merge.classList.add('show'); els.heroWho.innerHTML='● claude'; els.heroWho.style.color='var(--claude)';
+    } else { els.merge.classList.remove('show'); if(s>=14.2) els.colDone.classList.remove('highlight'); }
+
+    // Outro 18.6-20
+    els.outro.classList.toggle('show', s>=18.6);
+    if(s>=18.6) els.caption.innerHTML='开源免费试用 — <b>github.com/lzhgus/agent-kanban</b>';
+
+    // loop reset cleanup at wrap
+    if(s<1 && currentSlot && hero.parentNode!==document.getElementById('heroHost')){ /* next cycle will hide via s<6.6 branch */ }
+    requestAnimationFrame(render);
+  }
+  requestAnimationFrame(render); fit(); setTimeout(fit,60);
+
+  // Controls
+  var playBtn=document.getElementById('playBtn');
+  playBtn.addEventListener('click',function(){
+    paused=!paused; playBtn.textContent= paused?'▶ 继续播放':'⏸ 暂停';
+  });
+  document.getElementById('replayBtn').addEventListener('click',function(){ pendingSeek=0; paused=false; playBtn.textContent='⏸ 暂停'; lastPhase=-1; currentSlot=null; hero.style.display='none'; });
+  document.getElementById('skipBtn').addEventListener('click',function(){ pendingSeek=14250; paused=false; playBtn.textContent='⏸ 暂停'; lastPhase=-1; });
+  document.getElementById('track').addEventListener('click',function(e){
+    var r=this.getBoundingClientRect(); var ratio=clamp((e.clientX-r.left)/r.width,0,1); var target=ratio*DUR;
+    pendingSeek=target; lastPhase=-1; if(target<6600){ currentSlot=null; }
+  });
+})();
+</script>
+</body>
+</html>
