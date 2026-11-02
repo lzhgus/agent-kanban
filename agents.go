@@ -45,6 +45,9 @@ type result struct {
 	// Unsent are messages the turn took in while it ran but could not pass
 	// to the agent: they go in its next turn.
 	Unsent []string
+	// EndRef is where the turn left the agent's conversation, for a later
+	// turn to take it back to (rewindAgents).
+	EndRef string
 }
 
 // emit receives a log line as the agent works. It is called from the run's
@@ -60,6 +63,10 @@ var drivers = map[string]driver{
 }
 
 var agentNames = []string{"claude", "antigravity", "copilot"}
+
+// rewindAgents can resume their conversation at an earlier point (EndRef),
+// so a turn can be undone.
+var rewindAgents = map[string]bool{"claude": true}
 
 // liveAgents take messages while a turn runs, from Task.inbox: the agent
 // reads them at its next step. Others get them in a turn after the one
@@ -153,12 +160,17 @@ func claudeArgs(t Task) []string {
 		cfg, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{bridgeName: map[string]any{"type": "http", "url": t.mcpURL}}})
 		args = append(args, "--mcp-config="+string(cfg))
 	}
-	if t.readOnly { // Bash can still write: what it leaves is undone after the turn
-		args = append(args, "--disallowedTools=Write,Edit,NotebookEdit")
+	denied := "mcp__" + outsideName // the board's server for agents outside it: a turn has its own
+	if t.readOnly {                 // Bash can still write: what it leaves is undone after the turn
+		denied = "Write,Edit,NotebookEdit," + denied
 	}
+	args = append(args, "--disallowedTools="+denied)
 	if t.SessionRef != "" {
 		if t.resume {
 			args = append(args, "--resume", t.SessionRef)
+			if t.ResumeAt != "" { // the turns after it were undone
+				args = append(args, "--resume-session-at", t.ResumeAt)
+			}
 		} else {
 			args = append(args, "--session-id", t.SessionRef)
 		}
@@ -211,10 +223,9 @@ func claudeLive(t Task, in io.WriteCloser, out io.Reader, r *result, log emit) {
 			lines <- sc.Text()
 		}
 	}()
-	inbox, pending, n := t.inbox, map[string]bool{}, 0
+	inbox, pending := t.inbox, map[string]bool{}
 	send := func(text string) bool {
-		n++
-		id := fmt.Sprintf("%s-%d", t.SessionRef, n) // ponytail: echoed back as is; any unique string does
+		id := newUUID() // unique in the conversation: Claude Code ignores a message whose id it has seen
 		msg, _ := json.Marshal(map[string]any{"type": "user", "uuid": id, "message": map[string]any{"role": "user", "content": text}})
 		if _, err := in.Write(append(msg, '\n')); err != nil {
 			return false
@@ -281,6 +292,9 @@ func claudeLine(line []byte, r *result, log emit) (ev claudeEvent) {
 	}
 	if m.SessionID != "" { // the session exists: a reply can resume it
 		r.SessionRef = m.SessionID
+	}
+	if (m.Type == "assistant" || m.Type == "user") && m.UUID != "" && m.ParentToolUseID == nil {
+		r.EndRef = m.UUID // the conversation so far ends here
 	}
 	switch m.Type {
 	case "user":

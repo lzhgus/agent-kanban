@@ -89,8 +89,8 @@ func TestSessionArgs(t *testing.T) {
 	if a := strings.Join(agyArgs(task), " "); !strings.Contains(a, "--conversation abc") {
 		t.Errorf("agy, reply: %s", a)
 	}
-	if a := strings.Join(claudeArgs(task), " "); strings.Contains(a, "disallowed") {
-		t.Errorf("claude, a building turn denies tools: %s", a)
+	if a := strings.Join(claudeArgs(task), " "); !strings.Contains(a, "--disallowedTools=mcp__agent-kanban") || strings.Contains(a, "Write") {
+		t.Errorf("claude, a building turn denies only the outside server: %s", a)
 	}
 	task.readOnly = true
 	if a := strings.Join(claudeArgs(task), " "); !strings.Contains(a, "--disallowedTools=Write,Edit,NotebookEdit") {

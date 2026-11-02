@@ -231,6 +231,25 @@ func (w *Workspace) texts(path string) (before, after string, err error) {
 	return
 }
 
+// restore writes a file of the branch back as text, removing it when it
+// is empty and was not on the base, and commits that as you.
+func (w *Workspace) restore(path, text string) (Changes, error) {
+	full := filepath.Join(w.Worktree, filepath.FromSlash(path))
+	if !strings.HasPrefix(full, filepath.Clean(w.Worktree)+string(filepath.Separator)) {
+		return Changes{}, errors.New("the file is outside the worktree")
+	}
+	_, err := git(w.Worktree, "cat-file", "-e", w.BaseSHA+":"+path)
+	if text == "" && err != nil {
+		err = os.Remove(full)
+	} else if err = os.MkdirAll(filepath.Dir(full), 0o755); err == nil { // the agent may have deleted it
+		err = os.WriteFile(full, []byte(text), 0o644)
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return Changes{}, err
+	}
+	return w.checkpoint("You", "Revert a change in "+path)
+}
+
 // merge merges the branch into its base in your checkout, which must be on
 // the base branch with no uncommitted changes: the board does not move your
 // checkout or touch your work. A conflict leaves everything as it was.

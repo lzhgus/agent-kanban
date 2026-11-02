@@ -2,8 +2,9 @@ package main
 
 // Getting your attention. A task whose turn ends where it waits for you —
 // a plan to confirm, a question, finished work, an error — is unread until
-// you look at it. The Dock badge counts them, a desktop notification names
-// each while the window is in the background, and Cmd+J opens the next.
+// you look at it. The Dock badge and the menu bar icon count them, a
+// desktop notification names each while the window is in the background,
+// and Cmd+J opens the next.
 
 import (
 	"cmp"
@@ -11,6 +12,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/egoist/mygo"
 )
 
 // notice is a desktop notification about a task.
@@ -90,6 +93,52 @@ func (b *board) look() {
 			b.badge(n)
 		}
 	}
+	b.refreshTray()
+}
+
+// refreshTray sets the menu bar icon's count and menu again when what they
+// show changed. It runs on every frame and every save, as the window may
+// draw none while it is hidden.
+func (b *board) refreshTray() {
+	if b.tray == nil {
+		return
+	}
+	key := fmt.Sprint(len(b.runs))
+	for _, t := range b.unread() {
+		key += fmt.Sprintf("|%d %s", t.ID, t.Title)
+	}
+	if key != b.trayShown {
+		b.trayShown = key
+		b.tray()
+	}
+}
+
+// trayMenu is the menu bar icon's: the tasks waiting for you, to open one,
+// and a new task. show brings the window up.
+func (b *board) trayMenu(show func()) []*mygo.MenuItem {
+	do := func(f func()) func(*mygo.MenuItem, *mygo.Window) {
+		return func(*mygo.MenuItem, *mygo.Window) {
+			b.update(f)
+			show()
+		}
+	}
+	ts := b.unread()
+	head := fmt.Sprintf("%d waiting for you", len(ts))
+	if len(ts) == 0 {
+		head = "Nothing waiting for you"
+	}
+	items := []*mygo.MenuItem{{Label: head, Disabled: true}}
+	for _, t := range ts[:min(len(ts), 9)] {
+		items = append(items, &mygo.MenuItem{Label: fmt.Sprintf("#%d  %s", t.ID, clip(t.Title, 48)), Click: do(func() { b.open(t) })})
+	}
+	if n := len(b.runs); n > 0 {
+		items = append(items, &mygo.MenuItem{Label: fmt.Sprintf("%d running", n), Disabled: true})
+	}
+	return append(items, mygo.Separator(),
+		&mygo.MenuItem{Label: "New Task…", Click: do(func() { b.composing = true })},
+		&mygo.MenuItem{Label: "Open Agent Kanban", Click: do(func() {})},
+		mygo.Separator(),
+		&mygo.MenuItem{Role: mygo.RoleQuit})
 }
 
 // jumpNext opens the next task waiting for you, after the one open.

@@ -19,6 +19,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo/ui/editor"
 )
 
 // evalBoard is a board as the app runs it, with its MCP server, saved to
@@ -209,5 +211,131 @@ func TestEvalLead(t *testing.T) {
 	}
 	if !strings.Contains(logOf(lead), "mcp__kanban__wait_todo") || sub.WS == nil || sub.WS.Base != lead.WS.Branch {
 		t.Error("the lead did not wait for its subtask, or the subtask did not branch from it")
+	}
+}
+
+// Claude Code in your terminal files a task on the board through its MCP
+// server, waits for it and reads the outcome.
+func TestEvalOutsideAgent(t *testing.T) {
+	repo := evalRepo(t)
+	b, main, _ := evalBoard(t, "", t.TempDir())
+	url := b.bridge.openOutside("eval-token")
+	model := cmp.Or(os.Getenv("EVAL_MODEL"), "haiku")
+	cfg := `{"mcpServers":{"` + outsideName + `":{"type":"http","url":"` + url + `"}}}`
+	prompt := "Use the " + outsideName + " MCP server: call create_todo with title \"Hello file\", prompt \"Create hello.txt containing exactly hi.\", " +
+		"agent claude, model " + model + ", folder " + repo + ", and start true. Then call wait_todo on the task it filed, and reply with the task's number and status only."
+	cmd := exec.Command("claude", "-p", prompt, "--model", model, "--permission-mode", "bypassPermissions", "--mcp-config", cfg, "--strict-mcp-config")
+	cmd.Dir = t.TempDir()
+	type outcome struct {
+		out []byte
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() { out, err := cmd.CombinedOutput(); done <- outcome{out, err} }()
+	var got outcome
+	pump(t, main, func() bool {
+		select {
+		case got = <-done:
+			return true
+		default:
+			return false
+		}
+	}, 8*time.Minute)
+	t.Logf("terminal agent: %v\n%s", got.err, got.out)
+	if len(b.Tasks) != 1 {
+		t.Fatalf("%d tasks", len(b.Tasks))
+	}
+	task := b.Tasks[0]
+	t.Logf("task:\n%s", logOf(task))
+	if task.Status != Review || task.WS == nil || read(filepath.Join(task.WS.Dir(), "hello.txt")) != "hi" || task.PlanFirst {
+		t.Errorf("%s %q", task.Status, task.Err)
+	}
+	if !strings.Contains(string(got.out), "Review") {
+		t.Errorf("the terminal agent did not read the outcome")
+	}
+}
+
+// A session run in a terminal, taken over: a reply on the board resumes it
+// with what it knew.
+func TestEvalTakeOver(t *testing.T) {
+	repo := evalRepo(t)
+	b, main, _ := evalBoard(t, "", t.TempDir())
+	model := cmp.Or(os.Getenv("EVAL_MODEL"), "haiku")
+	id := newUUID()
+	cmd := exec.Command("claude", "-p", "Remember this code word for later: pelican. Reply with OK only.", "--session-id", id, "--model", model)
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	task := b.takeOver(&Session{Agent: "claude", ID: id, Title: "Code word", Dir: repo, Model: model, Updated: time.Now()})
+	b.reply(task, "What was the code word? Reply with the word only.")
+	pump(t, main, settledOf(task), 5*time.Minute)
+	t.Logf("log:\n%s", logOf(task))
+	if task.Status != Review || !strings.Contains(strings.ToLower(task.Result), "pelican") || task.WS != nil || task.SessionRef != id {
+		t.Errorf("%s %q: %q", task.Status, task.Err, task.Result)
+	}
+}
+
+// Undo takes the last turn back: its files go, and it is out of the
+// agent's conversation. (What the agent did outside the worktree, such as
+// Claude Code's own memory, stays.)
+func TestEvalUndo(t *testing.T) {
+	repo := evalRepo(t)
+	b, main, _ := evalBoard(t, "", t.TempDir())
+	task := evalTask(b, repo, "Create a.txt containing apple. Reply with one short sentence.")
+	pump(t, main, settledOf(task), 5*time.Minute)
+	b.reply(task, "Create b.txt containing banana. Reply with one short sentence.")
+	pump(t, main, settledOf(task), 5*time.Minute)
+	dir := task.WS.Dir()
+	if read(filepath.Join(dir, "b.txt")) != "banana" {
+		t.Fatalf("turn 2 did not write b.txt: %q", task.Err)
+	}
+	b.undo(task)
+	pump(t, main, func() bool { return !task.undoing }, time.Minute)
+	b.reply(task, "Without running any tool, quote the message I sent you just before this one, word for word.")
+	pump(t, main, settledOf(task), 5*time.Minute)
+	t.Logf("log:\n%s", logOf(task))
+	if read(filepath.Join(dir, "b.txt")) != "" || read(filepath.Join(dir, "a.txt")) != "apple" {
+		t.Error("the files are not as before turn 2")
+	}
+	if answer := task.Result; !strings.Contains(answer, "a.txt") || strings.Contains(answer, "b.txt") {
+		t.Errorf("the message before: %q", answer)
+	}
+}
+
+// A schedule that came due while the app was closed runs once; reverting
+// its change in the Changes tab takes it off the branch, and the agent's
+// next turn finds it gone.
+func TestEvalScheduleRevert(t *testing.T) {
+	repo := evalRepo(t)
+	b, main, _ := evalBoard(t, "", t.TempDir())
+	b.dir, b.prompt, b.agent, b.model = repo, "Create a file note.txt containing exactly the word banana. Then reply with one short sentence.", "claude", cmp.Or(os.Getenv("EVAL_MODEL"), "haiku")
+	b.repeat, b.at = "Every day", "09:00"
+	b.schedule(time.Now().Add(-72 * time.Hour))
+	b.fireDue(time.Now())
+	if len(b.Tasks) != 1 {
+		t.Fatalf("%d tasks", len(b.Tasks))
+	}
+	task := b.Tasks[0]
+	pump(t, main, settledOf(task), 5*time.Minute)
+	if task.Status != Review || read(filepath.Join(task.WS.Dir(), "note.txt")) != "banana" || !b.Schedules[0].Next.After(time.Now()) {
+		t.Fatalf("%s %q:\n%s", task.Status, task.Err, logOf(task))
+	}
+	before, after, err := task.WS.texts("note.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &diffPane{task: task, path: "note.txt", state: &editor.DiffState{Old: editor.NewBuffer(before), New: editor.NewBuffer(after)}}
+	b.diff = d
+	d.state.Revert(0)
+	b.restore(task, d)
+	pump(t, main, func() bool { return strings.Contains(logOf(task), "you reverted a change in note.txt") }, time.Minute)
+	if task.Changes.Files != 0 {
+		t.Fatalf("changes %+v", task.Changes)
+	}
+	b.reply(task, "Does the file note.txt exist right now? Check, then answer with exactly yes or no.")
+	pump(t, main, settledOf(task), 5*time.Minute)
+	if got := strings.ToLower(strings.Trim(strings.TrimSpace(task.Result), ".")); got != "no" {
+		t.Errorf("the agent says %q", task.Result)
 	}
 }

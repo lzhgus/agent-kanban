@@ -104,6 +104,7 @@ var (
 	iconFolder = lucide(`<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>`)
 	iconKanban = lucide(`<path d="M6 5v11"/><path d="M12 5v6"/><path d="M18 5v14"/>`)
 	iconMerge  = lucide(`<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/>`)
+	iconRepeat = lucide(`<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>`)
 	iconBranch = lucide(`<line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>`)
 )
 
@@ -172,7 +173,9 @@ func (b *board) sidebarView(c *ui.Context, p palette) {
 		for _, name := range []string{"claude", "codex", "antigravity", "copilot"} {
 			b.agentRow(c, p, name, name)
 		}
+		b.schedulesView(c, p)
 		ui.Box(c).Grow(1)
+		b.terminalRow(c, p)
 		b.limitRow(c, p)
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(6).Children(func() {
 			statusDot(c, p.brand, true)
@@ -180,6 +183,39 @@ func (b *board) sidebarView(c *ui.Context, p palette) {
 		})
 		ui.Text(c, "Outside sessions idle 2 h move to Done.").FontSize(11).TextColor(p.muted).Wrap().Padding(0, 6)
 	})
+}
+
+// schedulesView lists the schedules: when each runs next, to run it now
+// or delete it.
+func (b *board) schedulesView(c *ui.Context, p palette) {
+	if len(b.Schedules) == 0 {
+		return
+	}
+	ui.Text(c, "SCHEDULES").FontSize(10.5).Bold().LetterSpacing(0.8).TextColor(p.muted).Padding(18, 6, 6, 6)
+	for _, s := range b.Schedules {
+		row := ui.Row(c.Key(fmt.Sprint("schedule-", s.ID))).FillWidth().Padding(6, 6, 6, 8).Radius(controlRadius).Gap(6).AlignItems(ui.Center).Label(s.Title).Tooltip(s.Prompt)
+		hover := row.Hovered()
+		if hover {
+			row.Background(p.ink.Alpha(0.05))
+		}
+		row.Children(func() {
+			ui.Icon(c, iconRepeat).Size(13, 13).TextColor(p.muted).Shrink(0)
+			ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(1).Children(func() {
+				ui.Text(c, s.Title).FontSize(12.5).FontWeight(500).MaxLines(1)
+				ui.Text(c, s.rule()).FontSize(11).TextColor(p.muted).MaxLines(1)
+				ui.Text(c, "Next "+s.Next.Format("Mon Jan 2, 15:04")).FontSize(11).TextColor(p.muted).MaxLines(1)
+			})
+			if hover {
+				if button(c, p, "run-now", "", iconPlay, ghost).Label("Run now").Tooltip("Run now").Clicked() {
+					b.fire(s)
+					b.save()
+				}
+				if button(c, p, "unschedule", "", iconTrash, ghost).Label("Delete schedule").Tooltip("Delete the schedule; its tasks stay").Clicked() {
+					b.unschedule(s)
+				}
+			}
+		})
+	}
 }
 
 // waitingRow counts the tasks waiting for you; a click, or Cmd+J, opens the
@@ -200,6 +236,37 @@ func (b *board) waitingRow(c *ui.Context, p palette) {
 		ui.Box(c).Size(8, 8).Radius(4).Background(p.amber).Margin(0, 2)
 		ui.Text(c, fmt.Sprintf("%d waiting for you", n)).FontSize(13).FontWeight(500).Grow(1)
 		ui.Text(c, "⌘J").FontSize(11).Font("monospace").TextColor(p.muted)
+	})
+}
+
+// terminalCommand adds the board's MCP server to Claude Code, for every
+// folder you run it in.
+func terminalCommand(url string) string {
+	return "claude mcp add --transport http --scope user " + outsideName + " " + url
+}
+
+// terminalRow copies the command that lets Claude Code in your terminal file
+// tasks on the board, wait for them and message them.
+func (b *board) terminalRow(c *ui.Context, p palette) {
+	if b.outsideURL == "" {
+		return
+	}
+	label := "Copy the command"
+	if time.Since(b.copied) < 3*time.Second {
+		label = "Copied: paste it in a terminal"
+	}
+	row := ui.ButtonBase(c.Key("terminal")).Label("Use the board from your terminal").FillWidth().Padding(7, 8).Radius(controlRadius).Column().Gap(2).AlignItems(ui.Stretch).Cursor(ui.CursorPointer).
+		Tooltip("Adds the board to Claude Code as an MCP server: in your terminal, it can file tasks here, wait for them and message them")
+	if row.Hovered() {
+		row.Background(p.ink.Alpha(0.05))
+	}
+	if row.Clicked() && b.copyText != nil {
+		b.copyText(terminalCommand(b.outsideURL))
+		b.copied = time.Now()
+	}
+	row.Children(func() {
+		ui.Text(c, "Use from your terminal").FontSize(12.5).FontWeight(500)
+		ui.Text(c, label).FontSize(11).TextColor(p.muted)
 	})
 }
 
@@ -375,34 +442,50 @@ func (b *board) boardPane(c *ui.Context, p palette) {
 func (b *board) composerView(c *ui.Context, p palette) {
 	ui.Column(c.Key("composer")).Margin(0, 12, 8, 12).Padding(12).Gap(10).Radius(10).Background(p.column).Children(func() {
 		ui.TextArea(c.Key("prompt"), &b.prompt).Placeholder("Describe the task. The agent works in the folder below.").Label("Prompt").Height(72).Radius(controlRadius).Background(p.pane)
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+		// Rows wrap: the composer is narrow while a task is open.
+		ui.Row(c).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
 			ui.Select(c.Key("agent"), &b.agent, agentChoices).Label("Agent").Width(130)
 			ui.TextInput(c.Key("model"), &b.model).Placeholder("Model (default)").Label("Model").Width(140)
-			ui.Row(c).Grow(1).MinWidth(0).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Grow(1).MinWidth(220).Gap(6).AlignItems(ui.Center).Children(func() {
 				if button(c, p, "choose-dir", "", iconFolder, ghost).Label("Choose folder").Tooltip("Choose folder").Clicked() {
 					b.chooseFolder(b.dir, func(dir string) { b.dir = dir })
 				}
 				ui.TextInput(c.Key("dir"), &b.dir).Placeholder("Working directory").Label("Working directory").Grow(1).Font("monospace").FontSize(12)
 			})
 			ui.TextInput(c.Key("title"), &b.title).Placeholder("Title (optional)").Label("Title").Width(160)
+		})
+		ui.Row(c).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
+			ui.Select(c.Key("repeat"), &b.repeat, repeatChoices).Label("Repeat").Width(130).Tooltip("Run it on a timetable: each run is a new task")
+			if b.repeat != once {
+				ui.TextInput(c.Key("at"), &b.at).Placeholder("09:00").Label("At").Width(70).Font("monospace").FontSize(12).Tooltip("The time it runs, 24-hour; every hour runs at its minute")
+			}
 			ui.Checkbox(c.Key("plan-first"), &b.PlanFirst, "Plan first").Tooltip("The agent writes a plan, without changing files, and waits for you to confirm it")
 			ui.Checkbox(c.Key("lead"), &b.lead, "Lead").Tooltip("The agent leads: it splits the work into subtasks for other agents, waits for them and merges their branches")
+			ui.Box(c).Grow(1)
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				if button(c, p, "cancel", "Cancel", nil, ghost).Clicked() {
+					b.composing = false
+				}
+				empty := strings.TrimSpace(b.prompt) == ""
+				if b.repeat != once {
+					_, _, ok := parseAt(b.at)
+					if buttonIf(c, p, "schedule", "Schedule", iconRepeat, primary, empty || !ok).Clicked() {
+						b.schedule(time.Now())
+						b.composing = false
+					}
+					return
+				}
+				if buttonIf(c, p, "add", "Add", nil, secondary, empty).Clicked() {
+					b.add(false)
+					b.composing = false
+				}
+				if buttonIf(c, p, "add-run", "Add & Run", iconPlay, primary, empty).Clicked() {
+					b.add(true)
+					b.composing = false
+				}
+			})
 		})
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "Runs headless with permissions bypassed: pick a folder you trust it with.").FontSize(11).TextColor(p.muted).Grow(1)
-			if button(c, p, "cancel", "Cancel", nil, ghost).Clicked() {
-				b.composing = false
-			}
-			empty := strings.TrimSpace(b.prompt) == ""
-			if buttonIf(c, p, "add", "Add", nil, secondary, empty).Clicked() {
-				b.add(false)
-				b.composing = false
-			}
-			if buttonIf(c, p, "add-run", "Add & Run", iconPlay, primary, empty).Clicked() {
-				b.add(true)
-				b.composing = false
-			}
-		})
+		ui.Text(c, "Runs headless with permissions bypassed: pick a folder you trust it with.").FontSize(11).TextColor(p.muted).Wrap()
 	})
 }
 
@@ -591,6 +674,8 @@ func (b *board) cardView(c *ui.Context, p palette, task *Task) {
 				pill(c, fmt.Sprintf("Sub of #%d", task.From), p.muted)
 			case task.ReadOnly:
 				pill(c, "Read-only", p.muted)
+			case task.Schedule != 0:
+				pill(c, "Scheduled", p.muted)
 			}
 			if task.Unread {
 				ui.Box(c).Size(7, 7).Radius(4).Background(p.amber).Tooltip("Waiting for you: ⌘J opens the next")
@@ -811,6 +896,9 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 				}
 			}
 			ui.Box(c).Grow(1)
+			if b.canUndo(task) && button(c, p, "undo", "Undo turn", nil, ghost).Tooltip("Put the code back as it was before the last turn, and take that turn out of the agent's conversation").Clicked() {
+				b.undo(task)
+			}
 			if button(c, p, "delete", "Delete", iconTrash, danger).Clicked() {
 				b.remove(task)
 			}
@@ -867,6 +955,11 @@ func (b *board) sessionDetailView(c *ui.Context, p palette, s *Session) {
 				stat(c, p, "TOKENS", tokens(s.Tokens))
 			}
 		})
+		if s.Agent == "claude" && !s.Working {
+			if button(c, p, "take-over", "Continue on the board", iconPlay, primary).Tooltip("Make it a task: replies resume this session, in its folder").Clicked() {
+				b.takeOver(s)
+			}
+		}
 		ui.Text(c, "Drag it to Done to dismiss it until it goes on. Idle for 2 hours, it moves there by itself.").FontSize(11.5).TextColor(p.muted).Wrap()
 		logView(c, p, "session-log", s.Recent)
 	})
@@ -1143,6 +1236,7 @@ type diffPane struct {
 	path    string
 	state   *editor.DiffState
 	note    string // why the chosen file shows no diff
+	saved   uint64 // the version of the state's New on the branch
 }
 
 func (b *board) loadChanges(t *Task) {
@@ -1186,7 +1280,35 @@ func (b *board) openFile(d *diffPane, path string) {
 				o.SetLanguage(lang)
 				n.SetLanguage(lang)
 				d.state = &editor.DiffState{Old: o, New: n, Layout: editor.DiffUnified}
+				d.saved = n.Version()
 			}
+		})
+	}()
+}
+
+// restore writes the file the diff shows to the task's branch, as a change
+// in it was reverted. Writes go one at a time, each of the text as it is
+// then.
+func (b *board) restore(t *Task, d *diffPane) {
+	ws, path, buf := *t.WS, d.path, d.state.New
+	go func() {
+		b.writing.Lock()
+		var text strings.Builder
+		buf.WriteTo(&text)
+		ch, err := ws.restore(path, text.String())
+		files, _ := ws.files()
+		b.writing.Unlock()
+		b.update(func() {
+			if err != nil {
+				t.addLog("── reverting a change in " + path + " failed: " + err.Error())
+			} else {
+				t.Changes, t.Merged = ch, false
+				t.addLog("── you reverted a change in " + path)
+				if b.diff == d {
+					d.files = files
+				}
+			}
+			b.save()
 		})
 	}()
 }
@@ -1242,7 +1364,14 @@ func (b *board) changesView(c *ui.Context, p palette, t *Task) {
 			case d.state == nil:
 				ui.Spinner(c).Margin(12)
 			default:
+				// Revert on a change puts its old lines back, on the branch
+				// too; Keep only hides it.
+				d.state.HunkActions = t.Status != Running && t.rev == nil && !t.merging && !t.undoing
 				editor.DiffView(c.Key("diff-"+d.path), d.state).Grow(1).FillWidth()
+				if v := d.state.New.Version(); v != d.saved {
+					d.saved = v
+					b.restore(t, d)
+				}
 			}
 		})
 	})

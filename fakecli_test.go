@@ -237,15 +237,27 @@ func fakeClaude() {
 	}()
 	out := json.NewEncoder(os.Stdout)
 	out.Encode(map[string]any{"type": "system", "subtype": "init", "session_id": "fake-session"})
+	seenFile := os.Getenv("FAKE_LOG") + ".uuids" // the conversation's message ids, across its turns
+	seen, _ := os.ReadFile(seenFile)
 	take := func(m map[string]any) string {
 		out.Encode(map[string]any{"type": "user", "isReplay": true, "uuid": m["uuid"], "message": m["message"]})
+		id, _ := m["uuid"].(string)
+		if strings.Contains(string(seen), id+"\n") {
+			return "" // Claude Code takes a message it has seen in, and does nothing with it
+		}
+		seen = append(seen, id+"\n"...)
+		os.WriteFile(seenFile, seen, 0o600)
 		text, _ := m["message"].(map[string]any)["content"].(string)
 		fakeLog("took %s", text)
 		return text
 	}
 	input := 0
 	for m := range in {
-		got := []string{take(m)}
+		first := take(m)
+		if first == "" {
+			continue
+		}
+		got := []string{first}
 		if !strings.HasPrefix(got[0], "quick") {
 		window:
 			for wait := time.After(300 * time.Millisecond); ; {

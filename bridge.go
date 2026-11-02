@@ -7,18 +7,29 @@ package main
 // stops working when the turn ends.
 
 import (
+	"cmp"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 )
 
 const bridgeName = "kanban" // the MCP server's name: Claude Code calls its tools mcp__kanban__<tool>
+
+// The board's MCP server for agents outside it, such as Claude Code in your
+// terminal, is the same server at a fixed port, under a lasting token, and
+// by this name; the board's own turns are kept off it.
+const (
+	outsideName = "agent-kanban"
+	outsidePort = 47821
+)
 
 type bridge struct {
 	b    *board
@@ -28,11 +39,34 @@ type bridge struct {
 	turns map[string]*bridgeTurn // by token
 }
 
-// bridgeTurn is a turn the bridge serves.
+// bridgeTurn is a turn the bridge serves, or the agents outside the board.
 type bridgeTurn struct {
-	task     *Task
-	reviewer bool // reviewers read the board; they do not ask or file tasks
-	created  int  // tasks it filed: at most maxCreated
+	task     *Task // nil outside the board
+	reviewer bool  // reviewers read the board; they do not ask or file tasks
+	created  int   // tasks it filed: at most maxCreated
+}
+
+// outside reports whether it serves an agent outside the board: you, by
+// way of your own agent, so its tasks are yours.
+func (turn *bridgeTurn) outside() bool { return turn.task == nil }
+
+// can reports whether the turn has the tool.
+func (turn *bridgeTurn) can(t *bridgeTool) bool {
+	switch {
+	case turn.outside():
+		return t.outside
+	case turn.reviewer:
+		return t.readOnly
+	}
+	return true
+}
+
+// openOutside serves the agents outside the board at token, for good.
+func (br *bridge) openOutside(token string) string {
+	br.mu.Lock()
+	br.turns[token] = &bridgeTurn{}
+	br.mu.Unlock()
+	return br.base + token
 }
 
 const maxCreated = 5
@@ -127,7 +161,7 @@ func (br *bridge) handle(turn *bridgeTurn, m rpcMsg) (any, *rpcError) {
 	case "tools/list":
 		var tools []map[string]any
 		for _, t := range bridgeTools {
-			if !turn.reviewer || t.readOnly {
+			if turn.can(&t) {
 				tools = append(tools, map[string]any{"name": t.name, "description": t.description, "inputSchema": t.schema})
 			}
 		}
@@ -153,7 +187,7 @@ func (br *bridge) handle(turn *bridgeTurn, m rpcMsg) (any, *rpcError) {
 func (br *bridge) call(turn *bridgeTurn, name string, args json.RawMessage) (string, error) {
 	var tool *bridgeTool
 	for i := range bridgeTools {
-		if bridgeTools[i].name == name && (!turn.reviewer || bridgeTools[i].readOnly) {
+		if bridgeTools[i].name == name && turn.can(&bridgeTools[i]) {
 			tool = &bridgeTools[i]
 		}
 	}
@@ -200,6 +234,7 @@ type bridgeTool struct {
 	name, description string
 	schema            map[string]any
 	readOnly          bool // reviewers get it too
+	outside           bool // agents outside the board get it too
 	blocking          bool // run off the main thread: it waits, reading the board with b.sync
 	run               func(b *board, turn *bridgeTurn, args json.RawMessage) (string, error)
 }
@@ -244,23 +279,32 @@ var bridgeTools = []bridgeTool{
 			"With subtask, it is part of this task, handed to another agent: it starts right away, on a new branch from this task's last commit, " +
 			"needs no plan confirmed, and you can wait_todo for it, message_todo it, and git merge its branch into yours. " +
 			"Without subtask, it is separate work in this task's folder, such as a follow-up: it plans first, and the user confirms its plan before it changes anything; " +
-			"with start it runs right away, otherwise it waits in To Do. With read_only, its agent changes no files: research or a review, ending in a report.",
+			"with start it runs right away, otherwise it waits in To Do. With read_only, its agent changes no files: research or a review, ending in a report. " +
+			"Called from outside the board, as from a terminal, give the folder: the task is the user's, and plans first only with plan_first.",
 		schema: object(map[string]any{
-			"title":     str("A short title."),
-			"prompt":    str("What the agent should do, with the context it needs: it does not see this conversation."),
-			"agent":     map[string]any{"type": "string", "enum": agentChoices, "description": "Who does it: an agent, or any, whichever is free when it starts; this task's agent if left out."},
-			"subtask":   map[string]any{"type": "boolean", "description": "Part of this task: it starts now, on a branch of yours, with no plan to confirm."},
-			"read_only": map[string]any{"type": "boolean", "description": "Its agent reads but changes no files, and reports what it found."},
-			"start":     map[string]any{"type": "boolean", "description": "Run it right away (a subtask always does)."},
+			"title":      str("A short title."),
+			"prompt":     str("What the agent should do, with the context it needs: it does not see this conversation."),
+			"agent":      map[string]any{"type": "string", "enum": agentChoices, "description": "Who does it: an agent, or any, whichever is free when it starts; this task's agent if left out."},
+			"subtask":    map[string]any{"type": "boolean", "description": "Part of this task: it starts now, on a branch of yours, with no plan to confirm."},
+			"read_only":  map[string]any{"type": "boolean", "description": "Its agent reads but changes no files, and reports what it found."},
+			"start":      map[string]any{"type": "boolean", "description": "Run it right away (a subtask always does)."},
+			"model":      str("The model, for the agent's CLI; its default if left out (a subtask of the same agent: this task's)."),
+			"folder":     str("Outside the board only: the absolute path of the folder to work in."),
+			"plan_first": map[string]any{"type": "boolean", "description": "Outside the board only: plan first, and wait for the user to confirm the plan."},
 		}, "title", "prompt"),
+		outside: true,
 		run: func(b *board, turn *bridgeTurn, args json.RawMessage) (string, error) {
 			var a struct {
-				Title, Prompt, Agent string
-				Start, Subtask       bool
-				ReadOnly             bool `json:"read_only"`
+				Title, Prompt, Agent, Folder, Model string
+				Start, Subtask                      bool
+				ReadOnly                            bool `json:"read_only"`
+				PlanFirst                           bool `json:"plan_first"`
 			}
 			if err := json.Unmarshal(args, &a); err != nil || strings.TrimSpace(a.Prompt) == "" {
 				return "", fmt.Errorf("create_todo needs a title and a prompt")
+			}
+			if turn.outside() {
+				return fileForUser(b, a.Title, a.Prompt, a.Agent, a.Model, a.Folder, a.Start, a.ReadOnly, a.PlanFirst)
 			}
 			if turn.created >= maxCreated {
 				return "", fmt.Errorf("a turn files %d tasks at most", maxCreated)
@@ -283,6 +327,7 @@ var bridgeTools = []bridgeTool{
 			if t.Agent == from.Agent { // the same agent: the model the user chose for it
 				t.Model = from.Model
 			}
+			t.Model = cmp.Or(strings.TrimSpace(a.Model), t.Model)
 			kind := "filed"
 			if a.Subtask {
 				kind = "subtask"
@@ -306,6 +351,7 @@ var bridgeTools = []bridgeTool{
 		description: "List the tasks on the board: id, status, agent, title and branch.",
 		schema:      object(map[string]any{}),
 		readOnly:    true,
+		outside:     true,
 		run: func(b *board, turn *bridgeTurn, args json.RawMessage) (string, error) {
 			var lines []string
 			for _, t := range b.Tasks {
@@ -329,6 +375,7 @@ var bridgeTools = []bridgeTool{
 		description: "Read a task: its prompt, status, branch and changes, current plan, and the agent's last report.",
 		schema:      object(map[string]any{"id": map[string]any{"type": "integer", "description": "The task's number."}}, "id"),
 		readOnly:    true,
+		outside:     true,
 		run: func(b *board, turn *bridgeTurn, args json.RawMessage) (string, error) {
 			var a struct{ ID int }
 			json.Unmarshal(args, &a)
@@ -350,6 +397,7 @@ var bridgeTools = []bridgeTool{
 		}, "id"),
 		readOnly: true,
 		blocking: true,
+		outside:  true,
 		run: func(b *board, turn *bridgeTurn, args json.RawMessage) (string, error) {
 			var a struct {
 				ID      int
@@ -366,7 +414,7 @@ var bridgeTools = []bridgeTool{
 				var status Status
 				var found, running, gone bool
 				if !b.sync(func() {
-					if _, ok := b.runs[turn.task.ID]; !ok { // the turn waiting ended: stopped
+					if _, ok := b.runs[turn.taskID()]; !ok && !turn.outside() { // the turn waiting ended: stopped
 						gone = true
 						return
 					}
@@ -378,7 +426,7 @@ var bridgeTools = []bridgeTool{
 					if !running || time.Now().After(deadline) {
 						desc = describe(t)
 					}
-					if !logged {
+					if !logged && !turn.outside() {
 						turn.task.addLog(fmt.Sprintf("⧗ waiting for #%d", t.ID))
 						logged = true
 					}
@@ -402,11 +450,12 @@ var bridgeTools = []bridgeTool{
 		name: "message_todo",
 		description: "Send a message to another task's agent: while it works, it reads it at its next step (or after its turn, for agents that cannot), " +
 			"to steer it or give it context it needs. A subtask you filed that has finished takes it as its next turn, to ask it for more. " +
-			"Other tasks that wait for the user take no messages.",
+			"Other tasks that wait for the user take no messages, but from outside the board, as from a terminal, any task with a conversation does.",
 		schema: object(map[string]any{
 			"id":      map[string]any{"type": "integer", "description": "The task's number."},
 			"message": str("The message, with the context it needs."),
 		}, "id", "message"),
+		outside: true,
 		run: func(b *board, turn *bridgeTurn, args json.RawMessage) (string, error) {
 			var a struct {
 				ID      int
@@ -418,6 +467,17 @@ var bridgeTools = []bridgeTool{
 			t, from := b.task(a.ID), turn.task
 			if t == nil || t == from {
 				return "", fmt.Errorf("no other task #%d: list_todos shows them", a.ID)
+			}
+			if turn.outside() { // the user's own agent: the user's words
+				switch b.say(t, a.Message, "terminal") {
+				case saidLive:
+					return fmt.Sprintf("Delivered: #%d reads it at its next step.", t.ID), nil
+				case saidLater:
+					return fmt.Sprintf("Queued: #%d gets it when its turn ends.", t.ID), nil
+				case saidTurn:
+					return fmt.Sprintf("Sent: #%d is working on it; wait_todo waits for its answer.", t.ID), nil
+				}
+				return "", fmt.Errorf("task #%d has no conversation to continue: it never ran", t.ID)
 			}
 			who := fmt.Sprintf("#%d (%s)", from.ID, from.Agent)
 			if _, running := b.runs[t.ID]; !running && t.Status != Queued && t.From != from.ID {
@@ -453,6 +513,41 @@ var bridgeTools = []bridgeTool{
 			return "Shown on your card.", nil
 		},
 	},
+}
+
+func (turn *bridgeTurn) taskID() int {
+	if turn.task == nil {
+		return 0
+	}
+	return turn.task.ID
+}
+
+// fileForUser files a task an agent outside the board asks for: the user's,
+// through their own agent, so it plans first only if asked to.
+func fileForUser(b *board, title, prompt, agent, model, folder string, start, readOnly, planFirst bool) (string, error) {
+	folder = expandHome(strings.TrimSpace(folder))
+	if !filepath.IsAbs(folder) {
+		return "", fmt.Errorf("give the folder to work in, as an absolute path")
+	}
+	if fi, err := os.Stat(folder); err != nil || !fi.IsDir() {
+		return "", fmt.Errorf("no folder %s", folder)
+	}
+	agent = cmp.Or(agent, "claude")
+	if drivers[agent] == nil && agent != anyAgent {
+		return "", fmt.Errorf("no agent %q: one of %s", agent, strings.Join(agentChoices, ", "))
+	}
+	title = cmp.Or(strings.TrimSpace(title), firstLine(prompt))
+	b.NextID++
+	t := &Task{ID: b.NextID, Title: title, Prompt: strings.TrimSpace(prompt), Agent: agent, Model: strings.TrimSpace(model), Dir: folder, Status: Todo, ReadOnly: readOnly, PlanFirst: planFirst}
+	t.addLog("── filed from outside the board, by your agent")
+	b.Tasks = append(b.Tasks, t)
+	if start {
+		b.start(t)
+	} else {
+		b.save()
+		b.autopick()
+	}
+	return fmt.Sprintf("Filed task #%d for %s: %s (%s). wait_todo waits for it.", t.ID, t.Agent, title, t.Status), nil
 }
 
 // waitPoll is how often wait_todo looks at the task it waits for.

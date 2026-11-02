@@ -11,6 +11,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -100,16 +101,37 @@ type Task struct {
 	Sub bool
 	// Lead: its agent splits the work into subtasks for other agents.
 	Lead bool
+	// InPlace: it works in its folder itself, never a worktree, as the
+	// terminal session it took over did.
+	InPlace bool
+	// Marks are where each of its turns began and ended, the last last:
+	// what undoing a turn takes the code and the conversation back to.
+	Marks []TurnMark
+	// ResumeAt: the next turn resumes the conversation at this point, as
+	// turns after it were undone.
+	ResumeAt string
+	// Schedule is the schedule that filed it, if one did.
+	Schedule int
 
 	resume   bool          // this turn continues SessionRef (the drivers' copy only)
 	readOnly bool          // this turn may read but not write (the drivers' copy only)
 	draft    string        // the reply being written in the detail panel
 	inbox    <-chan string // messages while the turn runs, for a live agent (the drivers' copy only)
 	merging  bool
+	undoing  bool
 	rev      *reviewLoop // the AI review going on, if one is
 	pending  *queuedTurn // the turn waiting in the queue
 	mcpURL   string      // the board's MCP server for this turn (the drivers' copy only)
 	picked   bool        // auto pickup started its turn: its agent is busy with it
+}
+
+// TurnMark is a turn's place in the task's history.
+type TurnMark struct {
+	Turn  int
+	Head  string // the branch's commit before it
+	End   string // where it left the agent's conversation
+	First bool   // it began the conversation
+	Plan  bool   // it wrote a version of the plan
 }
 
 // Question is what an agent asked you: an answer is your next reply.
@@ -159,6 +181,12 @@ type board struct {
 	MaxRunning int
 	// AutoPickup: To Do tasks start by themselves as agents come free.
 	AutoPickup bool
+	// OutsideToken is the secret in the URL of the board's MCP server for
+	// agents outside it, such as Claude Code in your terminal.
+	OutsideToken string
+	// Schedules file tasks on a timetable (schedule.go).
+	Schedules      []*Schedule
+	NextScheduleID int
 
 	path            string
 	worktrees       string // where tasks' worktrees go
@@ -176,10 +204,13 @@ type board struct {
 	quickAdding     bool              // the To Do column's quick add is open
 	quick           string            // its text
 	quickAgent      string            // and its agent
+	repeat          string            // the composer's Repeat: once, or a schedule's
+	at              string            // and its time
 	runs            map[int]context.CancelFunc
 	inboxes         map[int]chan string // the running turns' messages, of the live agents
 	queue           []*Task             // tasks whose turn waits for a slot, first come first
 	procs           sync.WaitGroup      // drivers still running, for quitting
+	writing         sync.Mutex          // reverted changes being written to a branch
 	update          func(func())        // runs a function on the main thread: Window.Update
 	interrupted     []*Task             // tasks whose turn the app quit under, to resume
 	// Getting your attention (attention.go); nil without a window.
@@ -187,6 +218,11 @@ type board struct {
 	focused    func() bool
 	badge      func(int)
 	badgeShown int
+	tray       func()       // sets the menu bar icon's count and menu again
+	trayShown  string       // what they show
+	copyText   func(string) // to the clipboard
+	outsideURL string       // the MCP server for agents outside the board; "" without one
+	copied     time.Time    // when the terminal command was copied, for its label
 
 	// the new-task form, the handoff picker and the review row
 	title, prompt, agent, model, dir string
@@ -196,7 +232,7 @@ type board struct {
 }
 
 func newBoard(path string) *board {
-	b := &board{path: path, runs: map[int]context.CancelFunc{}, inboxes: map[int]chan string{}, agent: agentNames[0], rounds: roundChoices[0], quotaKick: make(chan struct{}, 1),
+	b := &board{path: path, runs: map[int]context.CancelFunc{}, inboxes: map[int]chan string{}, agent: agentNames[0], rounds: roundChoices[0], repeat: once, at: "09:00", quotaKick: make(chan struct{}, 1),
 		worktrees: filepath.Join(filepath.Dir(path), "worktrees")}
 	if path == "" {
 		b.worktrees = filepath.Join(os.TempDir(), "agent-kanban-worktrees")
@@ -228,6 +264,7 @@ func newBoard(path string) *board {
 // save writes the whole board. It runs on the main thread.
 // ponytail: whole-file rewrite per change; fine for hundreds of cards.
 func (b *board) save() {
+	b.refreshTray()
 	if b.path == "" {
 		return
 	}
@@ -562,7 +599,7 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 		t.WS, t.Changes, t.Merged = nil, Changes{}, false
 	}
 	if o.fresh {
-		t.Plans = nil
+		t.Plans, t.Marks = nil, nil
 	}
 	var ws *Workspace
 	if t.WS != nil {
@@ -615,6 +652,11 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 		t.addLog("note: outside git, nothing undoes edits the agent makes anyway")
 	}
 	task, began := *t, time.Now() // the driver reads a copy, never the board
+	if o.reviewer == "" {
+		t.ResumeAt = "" // this turn goes on from there
+	} else {
+		task.ResumeAt = ""
+	}
 	task.Prompt, task.resume, task.readOnly = prompt, o.resume, readOnly
 	if o.reviewer != "" { // the reviewer's own conversation, never the task's
 		task.Agent, task.Model, task.SessionRef, task.resume = o.reviewer, "", "", false
@@ -641,11 +683,11 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 			drop.remove()
 		}
 		var err error
-		if ws != nil || o.reviewer == "" { // a review uses the task's worktree, or its folder
+		if ws != nil || (o.reviewer == "" && !t.InPlace) { // a review uses the task's worktree, or its folder
 			ws, err = b.workspace(ws, task, log)
 		}
 		if err != nil {
-			b.update(func() { b.finish(t, result{}, err, time.Since(began), before, o, turnGit{}) })
+			b.update(func() { b.finish(t, result{}, err, time.Since(began), before, o, turnGit{}, task) })
 			return
 		}
 		head := ""
@@ -665,7 +707,8 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 			g.changes, g.err = ws.checkpoint(task.Agent, commitMessage(task, task.Runs))
 			g.ok = true
 		}
-		b.update(func() { b.finish(t, r, err, time.Since(began), before, o, g) })
+		g.head = head
+		b.update(func() { b.finish(t, r, err, time.Since(began), before, o, g, task) })
 	}()
 }
 
@@ -702,7 +745,8 @@ func (b *board) workspace(ws *Workspace, task Task, log emit) (*Workspace, error
 type turnGit struct {
 	ok        bool // a checkpoint ran; changes is the branch's
 	changes   Changes
-	discarded int // files a planning turn changed, put back
+	discarded int    // files a planning turn changed, put back
+	head      string // the commit the turn began on
 	err       error
 }
 
@@ -755,7 +799,7 @@ func (b *board) shared(t *Task) bool {
 // merge merges the task's branch into its base in your checkout, and marks
 // the task done.
 func (b *board) merge(t *Task) {
-	if t.WS == nil || t.merging || started(t) {
+	if t.WS == nil || t.merging || t.undoing || started(t) {
 		return
 	}
 	t.merging = true
@@ -785,7 +829,7 @@ func modelSuffix(m string) string {
 
 // finish records a turn's outcome. A stopped turn rests where the task was
 // before it; a plan rests at Confirm; work at Review.
-func (b *board) finish(t *Task, r result, err error, took time.Duration, before Status, o turnOpts, g turnGit) {
+func (b *board) finish(t *Task, r result, err error, took time.Duration, before Status, o turnOpts, g turnGit, task Task) {
 	defer b.autopick() // then To Do, if Auto is on
 	defer b.dispatch() // a slot is free: the next turn waiting takes it first
 	select {           // what it spent shows in the quotas
@@ -836,6 +880,9 @@ func (b *board) finish(t *Task, r result, err error, took time.Duration, before 
 	t.Usage.add(r.Usage)
 	if r.Text != "" {
 		t.Result = r.Text
+	}
+	if r.EndRef != "" && g.head != "" && rewindAgents[t.Agent] {
+		t.Marks = append(t.Marks, TurnMark{Turn: task.Runs, Head: g.head, End: r.EndRef, First: !o.resume, Plan: o.plan})
 	}
 	switch {
 	case r.SessionRef != "":
@@ -943,6 +990,76 @@ func (b *board) resumeInterrupted() {
 		b.turn(t, prompt, turnOpts{resume: true, plan: plan, kind: resumedKind})
 	}
 	b.interrupted = nil
+}
+
+// canUndo reports whether the task's last turn can be undone: its code put
+// back, and the turn taken out of the agent's conversation.
+func (b *board) canUndo(t *Task) bool {
+	n := len(t.Marks)
+	return n > 0 && t.WS != nil && !started(t) && !t.merging && !t.undoing && !b.shared(t) && (t.Marks[n-1].First || n > 1)
+}
+
+// undo takes the task back to before its last turn: the worktree to the
+// commit the turn began on, and the conversation to where the turn before
+// left it, which the next turn resumes at. Undoing the first turn leaves the
+// task as if it never ran.
+func (b *board) undo(t *Task) {
+	if !b.canUndo(t) {
+		return
+	}
+	m := t.Marks[len(t.Marks)-1]
+	t.Marks = t.Marks[:len(t.Marks)-1]
+	ws := *t.WS
+	t.undoing = true
+	go func() {
+		_, err := ws.discard(m.Head)
+		ch, _ := ws.changes()
+		b.update(func() {
+			t.undoing = false
+			if err != nil {
+				t.Err = "undo: " + err.Error()
+				t.addLog("✗ " + t.Err)
+				b.save()
+				return
+			}
+			t.Changes, t.Merged, t.Err, t.Question = ch, false, "", nil
+			if m.Plan && len(t.Plans) > 0 {
+				t.Plans = t.Plans[:len(t.Plans)-1]
+			}
+			if m.First {
+				t.SessionRef, t.ResumeAt, t.Result, t.Runs, t.Status, t.Marks = "", "", "", 0, Todo, nil
+			} else {
+				prev := t.Marks[len(t.Marks)-1]
+				t.ResumeAt, t.Status = prev.End, Review
+				if prev.Plan {
+					t.Status = Confirm
+				}
+			}
+			t.addLog(fmt.Sprintf("── undid turn %d: the code is back at %s, and the agent's conversation before it", m.Turn, m.Head[:min(12, len(m.Head))]))
+			b.save()
+		})
+	}()
+}
+
+// takeOver makes a Claude Code session you ran in a terminal a task of the
+// board: a reply resumes it, in its folder, where its work is. The watcher
+// leaves it to the task from then on.
+func (b *board) takeOver(s *Session) *Task {
+	if s.Agent != "claude" || s.Working || s.ID == "" {
+		return nil
+	}
+	b.NextID++
+	t := &Task{ID: b.NextID, Title: s.Title, Prompt: s.Title, Agent: "claude", Model: s.Model, Dir: s.Dir, Status: Review, InPlace: true,
+		SessionRef: s.ID, SessionIDs: []string{s.ID}, Runs: 1, Stage: "build", Doing: "terminal"}
+	t.addLog("── taken over from a Claude Code session in a terminal (" + s.ID + "): replies resume it here")
+	for _, line := range s.Recent {
+		t.addLog(line)
+	}
+	b.Tasks = append(b.Tasks, t)
+	b.sessions = slices.DeleteFunc(b.sessions, func(x *Session) bool { return x == s })
+	b.open(t)
+	b.save()
+	return t
 }
 
 // handoff is how agents collaborate: another agent picks up the task in the
@@ -1099,6 +1216,9 @@ func markedPath(out []byte) string {
 	return strings.TrimSpace(p)
 }
 
+//go:embed assets/tray.png
+var trayIcon []byte
+
 func main() {
 	useShellPath()
 	dir, err := os.UserConfigDir()
@@ -1106,13 +1226,27 @@ func main() {
 		log.Fatal(err)
 	}
 	b := newBoard(filepath.Join(dir, "agent-kanban", "board.json"))
-	if ln, err := net.Listen("tcp", "127.0.0.1:0"); err != nil {
+	// A fixed port, so agents outside the board keep its address; another
+	// port if it is taken, and no server for them.
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", outsidePort))
+	fixed := err == nil
+	if !fixed {
+		ln, err = net.Listen("tcp", "127.0.0.1:0")
+	}
+	if err != nil {
 		log.Printf("the agents' MCP server: %v; they run without it", err)
 	} else {
 		br := newBridge(b)
 		br.base = "http://" + ln.Addr().String() + "/mcp/"
 		go http.Serve(ln, br)
 		b.bridge = br
+		if fixed {
+			if b.OutsideToken == "" {
+				b.OutsideToken = newUUID()
+				b.save()
+			}
+			b.outsideURL = br.openOutside(b.OutsideToken)
+		}
 	}
 	mygo.App.WhenReady(func() {
 		win := mygo.NewWindow(mygo.WindowOptions{
@@ -1125,7 +1259,7 @@ func main() {
 			Content:        ui.View(b.view),
 		})
 		b.update = win.Update
-		b.focused, b.badge = win.IsFocused, mygo.App.SetBadgeCount
+		b.focused, b.badge, b.copyText = win.IsFocused, mygo.App.SetBadgeCount, mygo.Clipboard.WriteText
 		b.notify = func(n notice) {
 			if !mygo.NotificationsSupported() { // `go run .`: only the packaged app can
 				return
@@ -1143,6 +1277,26 @@ func main() {
 			win.Focus()
 		})
 		b.resumeInterrupted()
+		show := func() { win.Show(); win.Focus() }
+		if tray, err := mygo.NewTray(mygo.TrayOptions{ID: "agent-kanban", Icon: trayIcon, IconIsTemplate: true, ToolTip: "Agent Kanban"}); err != nil {
+			log.Printf("the menu bar icon: %v", err)
+		} else {
+			b.tray = func() {
+				title := ""
+				if n := len(b.unread()); n > 0 {
+					title = fmt.Sprint(n)
+				}
+				tray.SetTitle(title)
+				tray.SetMenu(mygo.NewMenu(b.trayMenu(show)))
+			}
+			b.refreshTray()
+		}
+		go func() { // the schedules
+			for {
+				win.Update(func() { b.fireDue(time.Now()) })
+				time.Sleep(30 * time.Second)
+			}
+		}()
 		go b.watchQuotas(win.Update)
 		go func() { // watch the agents run outside the board
 			w := newWatcher()

@@ -40,6 +40,12 @@ func TestClaudeLiveProtocol(t *testing.T) {
 	}
 	readLog(t, calls)
 
+	for _, prompt := range []string{"quick turn one", "quick turn two"} { // one conversation, a turn after another
+		if r, _ := run(prompt); r.Text != "got: "+prompt {
+			t.Errorf("a later turn of the conversation: %+v", r)
+		}
+	}
+
 	inbox := make(chan string, 4)
 	r, err := runClaude(context.Background(), Task{Agent: "claude", Prompt: "quick", Dir: dir, SessionRef: "s1", inbox: inbox}, func(string) {})
 	inbox <- "too late" // the turn is over: the board hands it to the next

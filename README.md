@@ -64,6 +64,8 @@ it supports, installed and signed in. You don't need Go unless you
   worktree on a `kanban/<id>-<title>` branch, so agents never touch your
   checkout or each other's files. Each turn ends in a commit, the Changes tab
   shows the diff, and **Merge** brings it into your branch when you are ready.
+  Hover a change in the diff and click **Revert** to take just that change
+  off the branch.
 - **Plan first.** A task can start with a read-only planning turn. The plan
   waits for you to confirm or revise it before any code changes.
 - **AI review.** At a plan or at finished changes, have another agent review.
@@ -79,10 +81,24 @@ it supports, installed and signed in. You don't need Go unless you
   and read the board (`list_todos`, `get_todo`).
 - **It tells you when it needs you.** A task that stops at a plan, a
   question, finished work or an error is marked until you open it. The Dock
-  badge counts them, a notification names each while the app is in the
-  background, and ⌘J opens the next.
+  badge and the menu bar icon count them, a notification names each while
+  the app is in the background, and ⌘J opens the next. The menu bar icon's
+  menu opens any of them, or a new task.
+- **Schedules.** Set **Repeat** on a new task (every hour, every day,
+  weekdays or every week, at a time you choose) and it runs on that
+  timetable, each run a new task on its own branch. A run missed while the
+  app was closed happens once when it opens.
 - **Survives a restart.** Quit the app in the middle of a turn, and when it
   opens again the agent resumes its conversation where it was.
+- **Undo a turn.** Took a wrong turn? **Undo turn** puts the task's branch
+  back as it was before the last turn and takes that turn out of Claude
+  Code's conversation. What the agent did outside the worktree stays.
+- **Use the board from your terminal.** Click **Use from your terminal** to
+  copy a `claude mcp add` command: then Claude Code in any terminal can file
+  tasks on the board, wait for them and message them.
+- **Take over a terminal session.** Open a Claude Code session the board is
+  watching and click **Continue on the board**: your replies resume it, in
+  its folder.
 - **Usage at a glance.** Tokens and cost per task and per agent, and each
   agent's plan windows (Claude's 5-hour and weekly limits, Copilot's premium
   requests, and so on) with when they reset.
