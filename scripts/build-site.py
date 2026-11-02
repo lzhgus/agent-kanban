@@ -13,7 +13,7 @@ REPO = "https://github.com/lzhgus/agent-kanban"
 # Default download link: the DMG of the current release. The page asks the
 # GitHub API for the latest release when it loads and swaps in its DMG and
 # version, so this only matters if that call fails. Bump it on release.
-DMG_VERSION = "0.1.1"
+DMG_VERSION = "0.1.2"
 DMG_URL = f"{REPO}/releases/download/v{DMG_VERSION}/agent-kanban-{DMG_VERSION}.dmg"
 RELEASES_API = "https://api.github.com/repos/lzhgus/agent-kanban/releases/latest"
 

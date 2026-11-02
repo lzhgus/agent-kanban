@@ -41,7 +41,7 @@ Agent Kanban 是一个桌面应用，把 Claude Code、GitHub Copilot CLI 和 An
 
 **[下载最新版本](https://github.com/lzhgus/agent-kanban/releases/latest)**（macOS）：已签名并经 Apple 公证的通用版应用，
 同时支持 Apple Silicon 和 Intel 芯片，需要 macOS 12 或更新版本，大小约 10 MB。
-当前版本是 [`agent-kanban-0.1.0.dmg`](https://github.com/lzhgus/agent-kanban/releases/download/v0.1.0/agent-kanban-0.1.0.dmg)。
+当前版本是 [`agent-kanban-0.1.2.dmg`](https://github.com/lzhgus/agent-kanban/releases/download/v0.1.2/agent-kanban-0.1.2.dmg)。
 
 1. 打开 DMG，把 **Agent Kanban** 拖进“应用程序”文件夹。
 2. 从“应用程序”、Dock 或 Spotlight 打开。
