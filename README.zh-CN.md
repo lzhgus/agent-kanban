@@ -16,6 +16,7 @@
 <p align="center">
   <a href="https://github.com/lzhgus/agent-kanban/releases/latest"><img src="https://img.shields.io/github/v/release/lzhgus/agent-kanban?label=%E4%B8%8B%E8%BD%BD&logo=apple&color=c8f169" alt="最新版本"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/lzhgus/agent-kanban?color=blue" alt="MIT License"></a>
+  <a href="https://awesomemygo.dev/apps/agent-kanban"><img src="https://awesomemygo.dev/badge.svg" alt="Listed on Awesome MyGo"></a>
 </p>
 
 <p align="center">
