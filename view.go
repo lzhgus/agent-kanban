@@ -187,7 +187,7 @@ func (b *board) sidebarView(c *ui.Context, p palette) {
 		b.limitRow(c, p)
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(6).Children(func() {
 			statusDot(c, p.brand, true)
-			ui.Text(c, "Watching Claude Code, Codex & Antigravity").FontSize(11).TextColor(p.muted).Wrap().Shrink(1).MinWidth(0)
+			ui.Text(c, "Watching Claude Code, Codex, Antigravity & Grok").FontSize(11).TextColor(p.muted).Wrap().Shrink(1).MinWidth(0)
 		})
 		ui.Text(c, "Outside sessions idle 2 h move to Done.").FontSize(11).TextColor(p.muted).Wrap().Padding(0, 6)
 	})

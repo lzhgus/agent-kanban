@@ -393,3 +393,35 @@ func TestEvalAgents(t *testing.T) {
 		})
 	}
 }
+
+// A Grok Build session run in a terminal shows on the board, read-only:
+// what it did, its tokens, and, once it is done, that it waits for you.
+func TestEvalOutsideGrok(t *testing.T) {
+	if _, err := exec.LookPath("grok"); err != nil {
+		t.Skip("no grok on PATH")
+	}
+	dir := t.TempDir()
+	cmd := exec.Command("grok", "-p", "Create hello.txt containing exactly hi. Then reply with one short sentence.", "--permission-mode", "bypassPermissions")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	t.Logf("terminal grok: %v\n%s", err, out)
+	if read(filepath.Join(dir, "hello.txt")) != "hi" {
+		t.Fatal("grok did not run")
+	}
+	b, _, _ := evalBoard(t, "", t.TempDir())
+	b.setSessions(newWatcher().scan(time.Now()))
+	real, _ := filepath.EvalSymlinks(dir)
+	var s *Session
+	for _, x := range b.sessions {
+		if x.Agent == "grok" && (x.Dir == dir || x.Dir == real) {
+			s = x
+		}
+	}
+	if s == nil {
+		t.Fatalf("not watched: %d sessions", len(b.sessions))
+	}
+	t.Logf("%s · %s · %d tokens\n%s", s.Title, s.Model, s.Tokens, strings.Join(s.Recent, "\n"))
+	if s.Working || s.Tokens == 0 || s.Title == "" || !strings.Contains(strings.Join(s.Recent, "\n"), "▸ Write hello.txt") || b.sessionStatus(s) != Review {
+		t.Errorf("%+v, status %s", s, b.sessionStatus(s))
+	}
+}

@@ -110,9 +110,9 @@ it supports, installed and signed in. You don't need Go unless you
   tasks first come, first served, one at a time each; a task for any agent
   goes to the free one with the most quota left. Tasks an agent filed
   always plan first and wait for you to confirm.
-- **Sessions outside the board.** Claude Code, Codex and Antigravity sessions
-  you run in a terminal show up on the board too, read-only, with their token
-  usage where the agent records it.
+- **Sessions outside the board.** Claude Code, Codex, Antigravity and Grok
+  Build sessions you run in a terminal show up on the board too, read-only,
+  with what they are doing and their token usage where the agent records it.
 
 ## Supported agents
 

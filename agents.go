@@ -197,10 +197,8 @@ func toolName(name string) string {
 			}
 		}
 	}
-	if rest, ok := strings.CutPrefix(name, "mcp__"); ok {
-		if server, tool, ok := strings.Cut(rest, "__"); ok {
-			return server + "/" + tool
-		}
+	if server, tool, ok := strings.Cut(strings.TrimPrefix(name, "mcp__"), "__"); ok && server != "" && tool != "" { // any other server's
+		return server + "/" + tool
 	}
 	return name
 }

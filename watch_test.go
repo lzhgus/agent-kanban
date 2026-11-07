@@ -70,7 +70,7 @@ func TestWatchCodex(t *testing.T) {
 	if w.sqlite == "" {
 		t.Skip("no sqlite3")
 	}
-	w.codexDir, w.claudeDir = t.TempDir(), t.TempDir()
+	w.codexDir, w.claudeDir, w.agyDir, w.grokDir = t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
 	now := time.Now()
 	ms := now.Add(-time.Minute).UnixMilli()
 	run := func(db, sql string) {
@@ -131,7 +131,7 @@ func TestWatchAgy(t *testing.T) {
 	if w.sqlite == "" {
 		t.Skip("no sqlite3")
 	}
-	w.codexDir, w.claudeDir, w.agyDir = t.TempDir(), t.TempDir(), t.TempDir()
+	w.codexDir, w.claudeDir, w.agyDir, w.grokDir = t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
 	now := time.Now()
 	at := func(d time.Duration) string { return now.Add(-d).UTC().Format("2006-01-02 15:04:05.000000-07:00") }
 	db := filepath.Join(w.agyDir, "conversation_summaries.db")
@@ -183,5 +183,51 @@ func TestSessionsLeaveOutTheBoards(t *testing.T) {
 	}
 	if strings.Join(ids, ",") != "c3,t1" {
 		t.Errorf("outside sessions %v", ids)
+	}
+}
+
+// Shapes as Grok Build 1.0.70 writes them to ~/.grok/sessions.
+func TestWatchGrok(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "%2FUsers%2Fme%2Fapp", "01a1b53c")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "summary.json"), []byte(`{"info":{"id":"01a1b53c","cwd":"/Users/me/app"},"generated_title":"Fix the login bug","current_model_id":"grok-4.7"}`), 0o600)
+	os.WriteFile(filepath.Join(dir, "usage.json"), []byte(`{"session":{"inputTokens":100,"outputTokens":10,"cachedReadTokens":60,"costUsdTicks":1e8}}`), 0o600)
+	write := func(lines ...string) {
+		f, _ := os.OpenFile(filepath.Join(dir, "updates.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		for _, l := range lines {
+			f.WriteString(`{"timestamp":1,"method":"session/update","params":{"sessionId":"01a1b53c","update":` + l + "}}\n")
+		}
+		f.Close()
+	}
+	w := &watcher{grokDir: root, grok: map[string]*grokFile{}}
+	write(`{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Fix the login "}}`,
+		`{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"bug\nplease"}}`,
+		`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Looking."}}`,
+		`{"sessionUpdate":"tool_call","toolCallId":"c1","title":"run_terminal_command","rawInput":{"command":"go test ./..."},"_meta":{"x.ai/tool":{"name":"run_terminal_command"}}}`,
+		`{"sessionUpdate":"tool_call","toolCallId":"c2","title":"use_tool","rawInput":{"tool_name":"github__create_issue","tool_input":{"title":"x"}},"_meta":{"x.ai/tool":{"name":"use_tool"}}}`)
+	got := w.scan(time.Now())
+	if len(got) != 1 {
+		t.Fatalf("%d sessions", len(got))
+	}
+	s := got[0]
+	if s.Agent != "grok" || s.ID != "01a1b53c" || s.Title != "Fix the login bug" || s.Dir != "/Users/me/app" || s.Model != "grok-4.7" || !s.Working {
+		t.Errorf("%+v", s)
+	}
+	if s.Usage != (Usage{Input: 40, Output: 10, CacheRead: 60, CostUSD: 0.01}) || s.Tokens != 110 {
+		t.Errorf("usage %+v, tokens %d", s.Usage, s.Tokens)
+	}
+	if r := strings.Join(s.Recent, "|"); r != "› Fix the login bug|Looking.|▸ Bash go test ./...|▸ github/create_issue" {
+		t.Errorf("recent %q", r)
+	}
+	write(`{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"The user sent a message while you were working:\n<user_query>\nand the tests\n</user_query>\nIf the user asks"}}`,
+		`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Fixed it."}}`,
+		`{"sessionUpdate":"turn_completed","stop_reason":"end_turn","usage":{"inputTokens":100}}`)
+	s = w.scan(time.Now())[0]
+	if r := strings.Join(s.Recent[4:], "|"); s.Working || r != "› and the tests|Fixed it." {
+		t.Errorf("working %v, recent %q", s.Working, r)
+	}
+	if old := time.Now().Add(-recentWindow - time.Hour); os.Chtimes(filepath.Join(dir, "updates.jsonl"), old, old) == nil && len(w.scan(time.Now())) != 0 {
+		t.Error("an old session is shown")
 	}
 }

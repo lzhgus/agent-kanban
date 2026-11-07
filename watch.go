@@ -2,8 +2,9 @@ package main
 
 // Watching the agents you run outside the board, read-only: the sessions
 // Claude Code writes to ~/.claude/projects/*/<id>.jsonl, the threads Codex
-// keeps in ~/.codex/state_5.sqlite and thread_history_1.sqlite, and the
-// conversations Antigravity keeps in ~/.gemini/antigravity-cli.
+// keeps in ~/.codex/state_5.sqlite and thread_history_1.sqlite, the
+// conversations Antigravity keeps in ~/.gemini/antigravity-cli, and the
+// sessions Grok Build keeps in ~/.grok/sessions/<cwd>/<id>.
 // Nothing here starts, stops or writes to them.
 
 import (
@@ -35,7 +36,7 @@ const (
 
 // Session is an agent conversation started outside the board.
 type Session struct {
-	Agent   string // "claude", "codex" or "antigravity"
+	Agent   string // "claude", "codex", "antigravity" or "grok"
 	ID      string
 	Title   string
 	Dir     string
@@ -54,9 +55,11 @@ type watcher struct {
 	claudeDir string
 	codexDir  string
 	agyDir    string
+	grokDir   string
 	sqlite    string
 	claude    map[string]*claudeFile // by path
 	codex     map[string]*Session    // by thread id, with its Recent kept between scans
+	grok      map[string]*grokFile   // by session folder
 	lastErr   string                 // the last error logged
 }
 
@@ -66,8 +69,10 @@ func newWatcher() *watcher {
 		claudeDir: filepath.Join(home, ".claude", "projects"),
 		codexDir:  filepath.Join(home, ".codex"),
 		agyDir:    filepath.Join(home, ".gemini", "antigravity-cli"),
+		grokDir:   filepath.Join(cmp.Or(os.Getenv("GROK_HOME"), filepath.Join(home, ".grok")), "sessions"),
 		claude:    map[string]*claudeFile{},
 		codex:     map[string]*Session{},
+		grok:      map[string]*grokFile{},
 	}
 	// The system's sqlite3 first: others on PATH (Android's) may lack -json.
 	if _, err := os.Stat("/usr/bin/sqlite3"); err == nil {
@@ -86,6 +91,7 @@ func (w *watcher) scan(now time.Time) []*Session {
 	out = append(out, codex...)
 	agy, agyErr := w.scanAgy(now)
 	out = append(out, agy...)
+	out = append(out, w.scanGrok(now)...)
 	err = errors.Join(err, agyErr)
 	if msg := fmt.Sprint(err); err != nil && msg != w.lastErr { // once, not every scan
 		log.Printf("watching: %v", err)
@@ -505,4 +511,155 @@ func (w *watcher) agyPrompts() map[string][]agyPrompt {
 		}
 	}
 	return by
+}
+
+// ── Grok Build ──────────────────────────────────────────────────────────────
+// Each session is a folder: summary.json names it, updates.jsonl is its
+// conversation as ACP session updates, usage.json its token counts. The
+// board's own Grok tasks run in a home of their own, not here.
+
+type grokFile struct {
+	offset  int64
+	stream  acpStream
+	user    strings.Builder // the user's message streaming in
+	working bool
+	recent  []string
+}
+
+func (w *watcher) scanGrok(now time.Time) []*Session {
+	paths, _ := filepath.Glob(filepath.Join(w.grokDir, "*", "*", "updates.jsonl"))
+	var out []*Session
+	for _, p := range paths {
+		fi, err := os.Stat(p)
+		if err != nil || now.Sub(fi.ModTime()) > recentWindow {
+			continue
+		}
+		dir := filepath.Dir(p)
+		var sum struct {
+			Info struct {
+				ID  string `json:"id"`
+				Cwd string `json:"cwd"`
+			} `json:"info"`
+			Title   string `json:"generated_title"`
+			Summary string `json:"session_summary"`
+			Model   string `json:"current_model_id"`
+		}
+		if data, err := os.ReadFile(filepath.Join(dir, "summary.json")); err != nil || json.Unmarshal(data, &sum) != nil || sum.Info.Cwd == "" {
+			continue
+		}
+		f := w.grok[dir]
+		if f == nil || fi.Size() < f.offset { // new, or rewritten (a rewind): start over
+			f = &grokFile{stream: acpStream{started: true, dirs: spellings(sum.Info.Cwd), tools: map[string]*acpTool{}}}
+			w.grok[dir] = f
+		}
+		if fi.Size() > f.offset {
+			if err := f.read(p); err != nil {
+				log.Printf("reading %s: %v", p, err)
+			}
+		}
+		s := &Session{Agent: "grok", ID: cmp.Or(sum.Info.ID, filepath.Base(dir)), Dir: sum.Info.Cwd, Model: sum.Model, Updated: fi.ModTime(),
+			Title: firstLine(cmp.Or(sum.Title, sum.Summary)), Recent: slices.Clone(f.recent)}
+		s.Working = f.working && now.Sub(s.Updated) < staleAfter
+		if s.Title == "" {
+			s.Title = "Grok Build in " + filepath.Base(s.Dir)
+		}
+		var usage struct {
+			Session struct {
+				Input      int     `json:"inputTokens"` // cache reads included
+				Output     int     `json:"outputTokens"`
+				CacheRead  int     `json:"cachedReadTokens"`
+				CacheWrite int     `json:"cacheCreationTokens"`
+				CostTicks  float64 `json:"costUsdTicks"`
+			} `json:"session"`
+		}
+		if data, err := os.ReadFile(filepath.Join(dir, "usage.json")); err == nil && json.Unmarshal(data, &usage) == nil {
+			u := usage.Session
+			s.Usage = Usage{Input: max(0, u.Input-u.CacheRead), Output: u.Output, CacheRead: u.CacheRead, CacheWrite: u.CacheWrite, CostUSD: u.CostTicks / 1e10}
+			s.Tokens = s.Usage.total()
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// read consumes the updates appended since the last read; a line still
+// being written waits for the next.
+func (f *grokFile) read(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if _, err := file.Seek(f.offset, io.SeekStart); err != nil {
+		return err
+	}
+	r := bufio.NewReaderSize(file, 256*1024)
+	for {
+		line, err := r.ReadBytes('\n')
+		if err != nil {
+			break
+		}
+		f.offset += int64(len(line))
+		f.line(line)
+	}
+	return nil
+}
+
+func (f *grokFile) line(line []byte) {
+	var e struct {
+		Params struct {
+			Update struct {
+				Kind    string `json:"sessionUpdate"`
+				Content struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"update"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(line, &e) != nil {
+		return
+	}
+	u := e.Params.Update
+	if u.Kind == "user_message_chunk" {
+		f.user.WriteString(u.Content.Text)
+		f.working = true
+		return
+	}
+	if f.user.Len() > 0 { // the message is whole
+		f.say("› " + firstLine(grokTyped(f.user.String())))
+		f.user.Reset()
+	}
+	switch u.Kind {
+	case "agent_message_chunk", "agent_thought_chunk", "tool_call":
+		f.working = true
+	case "turn_completed":
+		f.working = false
+	}
+	var params struct {
+		Params json.RawMessage `json:"params"`
+	}
+	json.Unmarshal(line, &params)
+	var r result
+	f.stream.update("session/update", params.Params, &r, f.say)
+	if u.Kind == "turn_completed" {
+		f.stream.end(&r, f.say)
+		f.stream.tools, f.stream.order = map[string]*acpTool{}, nil
+	}
+}
+
+func (f *grokFile) say(line string) {
+	if line = strings.TrimSpace(line); line != "" {
+		f.recent = appendRecent(f.recent, line)
+	}
+}
+
+// grokTyped is what the user typed, out of the wrapper Grok puts round a
+// message sent while it works.
+func grokTyped(msg string) string {
+	if _, rest, ok := strings.Cut(msg, "<user_query>"); ok {
+		if typed, _, ok := strings.Cut(rest, "</user_query>"); ok {
+			return strings.TrimSpace(typed)
+		}
+	}
+	return msg
 }

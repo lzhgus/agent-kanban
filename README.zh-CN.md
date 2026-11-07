@@ -90,8 +90,9 @@ git 分支上工作。agent 可以先计划再动手、互相审查对方的工�
   打开 **Auto** 后，空闲的 agent 会按先来先得的顺序领取 To Do 任务，每个 agent 一次一个；
   指定给任意 agent 的任务会交给剩余额度最多的那个空闲 agent。由 agent 创建的任务
   总是先做计划，并等待你确认。
-- **看板之外的会话。** 你在终端里运行的 Claude Code、Codex 和 Antigravity 会话也会
-  出现在看板上（只读），只要 agent 有记录，就会显示它们的 token 用量。
+- **看板之外的会话。** 你在终端里运行的 Claude Code、Codex、Antigravity 和 Grok Build
+  会话也会出现在看板上（只读），能看到它们在做什么；只要 agent 有记录，就会显示
+  token 用量。
 
 ## 支持的 agent
 

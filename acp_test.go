@@ -17,7 +17,8 @@ func TestToolName(t *testing.T) {
 		"search_replace": "Edit", "write": "Write", "search_tool": "ToolSearch",
 		"mcp__kanban__ask_user": "kanban/ask_user", "kanban__ask_user": "kanban/ask_user", "kanban_ask_user": "kanban/ask_user",
 		"kanban-ask_user": "kanban/ask_user", "mcp__agent-kanban__create_todo": "agent-kanban/create_todo",
-		"mcp__github__create_issue": "github/create_issue", "kanbanize": "kanbanize", "codemode": "codemode",
+		"mcp__github__create_issue": "github/create_issue", "github__create_issue": "github/create_issue",
+		"kanbanize": "kanbanize", "codemode": "codemode", "__init__": "__init__",
 	} {
 		if got := toolName(in); got != want {
 			t.Errorf("%s: %s, want %s", in, got, want)
