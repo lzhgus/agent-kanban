@@ -64,7 +64,7 @@ func TestAntigravityLines(t *testing.T) {
 	} {
 		ended = s.line([]byte(l), &r, log) || ended
 	}
-	want := []string{"▸ run_command ls", "All done"}
+	want := []string{"▸ Bash ls", "All done"}
 	if fmt.Sprint(*lines) != fmt.Sprint(want) {
 		t.Errorf("log %q, want %q", *lines, want)
 	}
@@ -119,7 +119,7 @@ func TestCopilotEvents(t *testing.T) {
 	if !ev("session.idle", `{}`) {
 		t.Fatal("idle did not end the turn")
 	}
-	want := []string{"Fixing", "▸ bash make", "Fixed it."}
+	want := []string{"Fixing", "▸ Bash make", "Fixed it."}
 	if fmt.Sprint(*lines) != fmt.Sprint(want) {
 		t.Errorf("log %q, want %q", *lines, want)
 	}

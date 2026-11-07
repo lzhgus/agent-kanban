@@ -61,6 +61,14 @@ func (p palette) agent(name string) ui.Color {
 		return pick(dark, "#c3ec74", "#5f8f1f")
 	case "copilot":
 		return pick(dark, "#b9a3e3", "#7d5fc9")
+	case "grok":
+		return pick(dark, "#d6d3cd", "#3d3a36")
+	case "pi":
+		return pick(dark, "#f0c36b", "#b07d12")
+	case "opencode":
+		return pick(dark, "#9fb4c8", "#4a6378")
+	case "kimi":
+		return pick(dark, "#7fb2ff", "#2563c9")
 	}
 	return p.muted
 }
@@ -170,7 +178,7 @@ func (b *board) sidebarView(c *ui.Context, p palette) {
 		b.waitingRow(c, p)
 		ui.Text(c, "AGENTS").FontSize(10.5).Bold().LetterSpacing(0.8).TextColor(p.muted).Padding(18, 6, 6, 6)
 		b.agentRow(c, p, "", "All agents")
-		for _, name := range []string{"claude", "codex", "antigravity", "copilot"} {
+		for _, name := range []string{"claude", "codex", "antigravity", "copilot", "grok", "pi", "opencode", "kimi"} {
 			b.agentRow(c, p, name, name)
 		}
 		b.schedulesView(c, p)

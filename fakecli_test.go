@@ -1,7 +1,7 @@
 package main
 
-// Antigravity and Copilot are not installed here, so the test binary plays
-// them: run as `agy` or `copilot` from a PATH of scripts, it speaks the
+// The agent CLIs are not run here, so the test binary plays them: run as
+// `agy`, `copilot`, `grok` or `pi` from a PATH of scripts, it speaks the
 // protocol each driver expects. This runs the
 // real drivers: process launch, framing, the JSON-RPC client, resuming.
 
@@ -30,25 +30,36 @@ func TestMain(m *testing.M) {
 	case "claude":
 		fakeClaude()
 		os.Exit(0)
+	case "grok":
+		fakeGrok()
+		os.Exit(0)
+	case "pi":
+		fakePi()
+		os.Exit(0)
+	case "kimi", "opencode":
+		fakeACP(os.Getenv("FAKE_CLI"))
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }
 
-// fakeCLIs puts scripts named agy and copilot first on PATH, and returns
-// the file each fake logs what it was asked to.
+// fakeCLIs puts scripts named for the agents first on PATH, and returns the
+// file each fake logs what it was asked to. HOME is a new folder, for the
+// agents' homes the board keeps.
 func fakeCLIs(t *testing.T) (logFile string) {
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	bin := t.TempDir()
-	for _, name := range []string{"agy", "copilot"} {
+	for _, name := range []string{"agy", "copilot", "grok", "pi", "kimi", "opencode"} {
 		script := fmt.Sprintf("#!/bin/sh\nFAKE_CLI=%s exec %q \"$@\"\n", name, exe)
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HOME", t.TempDir())
 	logFile = filepath.Join(t.TempDir(), "calls")
 	t.Setenv("FAKE_LOG", logFile)
 	return logFile

@@ -275,7 +275,7 @@ var bridgeTools = []bridgeTool{
 	},
 	{
 		name: "create_todo",
-		description: "File a new task on the board, for yourself or another agent (claude, antigravity, copilot). " +
+		description: "File a new task on the board, for yourself or another agent (" + strings.Join(agentNames, ", ") + "). " +
 			"With subtask, it is part of this task, handed to another agent: it starts right away, on a new branch from this task's last commit, " +
 			"needs no plan confirmed, and you can wait_todo for it, message_todo it, and git merge its branch into yours. " +
 			"Without subtask, it is separate work in this task's folder, such as a follow-up: it plans first, and the user confirms its plan before it changes anything; " +

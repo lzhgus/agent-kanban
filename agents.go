@@ -1,6 +1,6 @@
 package main
 
-// The three agent drivers. Each launches the vendor CLI the user already
+// The agent drivers. Each launches the vendor CLI the user already
 // installed and signed in to, in its headless streaming mode, and turns its
 // output into log lines and token usage.
 
@@ -11,7 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -60,9 +62,13 @@ var drivers = map[string]driver{
 	"claude":      runClaude,
 	"antigravity": runAntigravity,
 	"copilot":     runCopilot,
+	"grok":        runGrok,
+	"pi":          runPi,
+	"opencode":    runOpencode,
+	"kimi":        runKimi,
 }
 
-var agentNames = []string{"claude", "antigravity", "copilot"}
+var agentNames = []string{"claude", "antigravity", "copilot", "grok", "pi", "opencode", "kimi"}
 
 // rewindAgents can resume their conversation at an earlier point (EndRef),
 // so a turn can be undone.
@@ -71,7 +77,7 @@ var rewindAgents = map[string]bool{"claude": true}
 // liveAgents take messages while a turn runs, from Task.inbox: the agent
 // reads them at its next step. Others get them in a turn after the one
 // running.
-var liveAgents = map[string]bool{"claude": true}
+var liveAgents = map[string]bool{"claude": true, "grok": true, "pi": true}
 
 // command starts bin in its own process group, so stopping a run also ends
 // the tools the agent spawned.
@@ -83,6 +89,37 @@ func command(ctx context.Context, cwd, bin string, args ...string) *exec.Cmd {
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = 15 * time.Second
 	return cmd
+}
+
+// agentHome is a folder of the board's own for an agent's config, so the
+// agent runs apart from the user's: their rules, plugins and servers stay
+// out, and only the sign-in is shared.
+func agentHome(name string) (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	home := filepath.Join(dir, "agent-kanban", name)
+	return home, os.MkdirAll(home, 0o700)
+}
+
+// share links src, a sign-in file of the user's, into dir, so a token the
+// agent refreshes is the user's too. It reports whether src exists.
+func share(src, dir string) bool {
+	if _, err := os.Stat(src); err != nil {
+		return false
+	}
+	dst := filepath.Join(dir, filepath.Base(src))
+	if fi, err := os.Lstat(dst); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return true
+	}
+	os.Remove(dst)
+	if os.Symlink(src, dst) != nil { // a copy then: a refreshed token stays behind
+		if data, err := os.ReadFile(src); err == nil {
+			os.WriteFile(dst, data, 0o600)
+		}
+	}
+	return true
 }
 
 // stderrTail keeps the end of a process's stderr for the error message.
@@ -121,14 +158,51 @@ func newScanner(r io.Reader) *bufio.Scanner {
 	return sc
 }
 
-// toolLine formats a tool call: its name and its most telling argument.
+// toolLine formats a tool call: its name, as Claude Code would name it, and
+// its most telling argument.
 func toolLine(name string, args map[string]any) string {
-	for _, k := range []string{"command", "file_path", "path", "pattern", "url", "query", "description"} {
+	name = toolName(name)
+	for _, k := range []string{"command", "file_path", "filePath", "path", "pattern", "url", "query", "description"} {
 		if v, ok := args[k].(string); ok && v != "" {
 			return "▸ " + name + " " + firstLine(v)
 		}
 	}
 	return "▸ " + name
+}
+
+// toolNames maps each agent's names for the same tools to one set.
+var toolNames = map[string]string{
+	"bash": "Bash", "shell": "Bash", "run_command": "Bash", "run_terminal_command": "Bash", "run_terminal_cmd": "Bash",
+	"read": "Read", "read_file": "Read", "view": "Read",
+	"write": "Write", "write_file": "Write", "create_file": "Write", "create": "Write",
+	"edit": "Edit", "search_replace": "Edit", "patch": "Edit", "apply_patch": "Edit", "str_replace": "Edit",
+	"grep": "Grep", "glob": "Glob", "list_dir": "Glob",
+	"web_fetch": "WebFetch", "webfetch": "WebFetch", "web_search": "WebSearch", "websearch": "WebSearch",
+	"task": "Task", "subagent": "Task", "Agent": "Task",
+	"search_tool": "ToolSearch", "tool_search": "ToolSearch",
+}
+
+// toolName names a tool for the log: one name for the same tool across
+// agents, and an MCP server's tool as server/tool, however the agent
+// prefixes it (mcp__kanban__ask_user, kanban__ask_user, kanban_ask_user,
+// kanban-ask_user).
+func toolName(name string) string {
+	if n, ok := toolNames[name]; ok {
+		return n
+	}
+	for _, server := range []string{bridgeName, outsideName} {
+		for _, sep := range []string{"__", "_", "-"} {
+			if tool, ok := strings.CutPrefix(strings.TrimPrefix(name, "mcp__"), server+sep); ok && tool != "" {
+				return server + "/" + tool
+			}
+		}
+	}
+	if rest, ok := strings.CutPrefix(name, "mcp__"); ok {
+		if server, tool, ok := strings.Cut(rest, "__"); ok {
+			return server + "/" + tool
+		}
+	}
+	return name
 }
 
 func firstLine(s string) string {
@@ -640,7 +714,9 @@ func (s *copilotStream) flush(r *result, log emit) {
 	s.text.Reset()
 }
 
-// rpc is a JSON-RPC 2.0 client over Content-Length framed stdio.
+// rpc is a JSON-RPC 2.0 client over stdio: Content-Length framed, as
+// Copilot's server is, or one message per line, as the Agent Client
+// Protocol is.
 type rpc struct {
 	w       io.Writer
 	wmu     sync.Mutex
@@ -648,6 +724,10 @@ type rpc struct {
 	next    int
 	pending map[int]chan rpcReply
 	closed  chan struct{}
+	label   string // the agent, for errors
+	lines   bool
+	// serve answers a request from the agent; nil, or a nil answer, declines it.
+	serve func(method string, params json.RawMessage) any
 }
 
 type rpcReply struct {
@@ -658,14 +738,35 @@ type rpcReply struct {
 }
 
 func newRPC(w io.Writer, r io.Reader, notify func(method string, params json.RawMessage)) *rpc {
-	c := &rpc{w: w, pending: map[int]chan rpcReply{}, closed: make(chan struct{})}
+	c := &rpc{w: w, label: "copilot"}
+	c.start(r, notify)
+	return c
+}
+
+// newACP speaks the Agent Client Protocol: JSON-RPC, a message a line.
+func newACP(w io.Writer, r io.Reader, label string, notify func(method string, params json.RawMessage), serve func(method string, params json.RawMessage) any) *rpc {
+	c := &rpc{w: w, label: label, lines: true, serve: serve}
+	c.start(r, notify)
+	return c
+}
+
+func (c *rpc) start(r io.Reader, notify func(method string, params json.RawMessage)) {
+	c.pending, c.closed = map[int]chan rpcReply{}, make(chan struct{})
 	go func() {
 		defer close(c.closed)
-		br := bufio.NewReader(r)
+		br, sc := bufio.NewReader(r), newScanner(r) // one or the other reads
 		for {
-			body, err := readFrame(br)
-			if err != nil {
-				return
+			var body []byte
+			if c.lines {
+				if !sc.Scan() {
+					return
+				}
+				body = sc.Bytes()
+			} else {
+				var err error
+				if body, err = readFrame(br); err != nil {
+					return
+				}
 			}
 			var m struct {
 				ID     *json.RawMessage `json:"id"`
@@ -677,8 +778,16 @@ func newRPC(w io.Writer, r io.Reader, notify func(method string, params json.Raw
 				continue
 			}
 			switch {
-			case m.ID != nil && m.Method != "": // a request from the server: nobody is here to answer it
-				c.send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32601, "message": "unattended: " + m.Method}})
+			case m.ID != nil && m.Method != "": // a request from the agent
+				var answer any
+				if c.serve != nil {
+					answer = c.serve(m.Method, m.Params)
+				}
+				if answer != nil {
+					c.send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": answer})
+				} else { // nobody is here to answer it
+					c.send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32601, "message": "unattended: " + m.Method}})
+				}
 			case m.ID != nil:
 				id, _ := strconv.Atoi(string(*m.ID))
 				c.mu.Lock()
@@ -693,41 +802,60 @@ func newRPC(w io.Writer, r io.Reader, notify func(method string, params json.Raw
 			}
 		}
 	}()
-	return c
 }
 
 func (c *rpc) send(msg any) error {
 	body, _ := json.Marshal(msg)
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
+	if c.lines {
+		_, err := c.w.Write(append(body, '\n'))
+		return err
+	}
 	_, err := fmt.Fprintf(c.w, "Content-Length: %d\r\n\r\n%s", len(body), body)
 	return err
 }
 
 func (c *rpc) call(ctx context.Context, method string, params, out any) error {
+	ch, err := c.request(method, params)
+	if err != nil {
+		return err
+	}
+	return c.wait(ctx, method, ch, out)
+}
+
+// request sends a call, and returns where its reply comes.
+func (c *rpc) request(method string, params any) (chan rpcReply, error) {
 	ch := make(chan rpcReply, 1)
 	c.mu.Lock()
 	c.next++
 	id := c.next
 	c.pending[id] = ch
 	c.mu.Unlock()
-	if err := c.send(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}); err != nil {
-		return err
-	}
+	return ch, c.send(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+}
+
+// wait waits for the reply to a request, into out.
+func (c *rpc) wait(ctx context.Context, method string, ch chan rpcReply, out any) error {
+	var rep rpcReply
 	select {
-	case rep := <-ch:
-		if rep.Error != nil {
-			return fmt.Errorf("%s: %s", method, rep.Error.Message)
-		}
-		if out != nil {
-			return json.Unmarshal(rep.Result, out)
-		}
-		return nil
+	case rep = <-ch:
 	case <-c.closed:
-		return fmt.Errorf("%s: copilot exited", method)
+		select {
+		case rep = <-ch: // it replied, then exited
+		default:
+			return fmt.Errorf("%s: %s exited", method, c.label)
+		}
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+	if rep.Error != nil {
+		return fmt.Errorf("%s: %s", method, rep.Error.Message)
+	}
+	if out != nil {
+		return json.Unmarshal(rep.Result, out)
+	}
+	return nil
 }
 
 func readFrame(br *bufio.Reader) ([]byte, error) {

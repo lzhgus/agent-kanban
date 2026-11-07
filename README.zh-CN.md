@@ -27,16 +27,16 @@
   <sub>20 秒宣传动画（模拟数据）。<a href="site/media/promo-zh.mp4">MP4 版本</a> · <a href="https://agent-kanban.lzhgus.com/zh/demo/">交互版本</a></sub>
 </p>
 
-Agent Kanban 是一个桌面应用，把 Claude Code、GitHub Copilot CLI 和 Antigravity
-当作看板上的任务来运行。每个任务在自己的 git 分支上工作。agent 可以先计划再动手、
-互相审查对方的工作、向你提问、互相创建任务；每个 agent 的进度、token 用量和套餐额度
-都能在一个地方看到。
+Agent Kanban 是一个桌面应用，把 Claude Code、GitHub Copilot CLI、Antigravity、
+Grok Build、Pi、Kimi Code 和 OpenCode 当作看板上的任务来运行。每个任务在自己的
+git 分支上工作。agent 可以先计划再动手、互相审查对方的工作、向你提问、互相创建任务；
+每个 agent 的进度、token 用量和套餐额度都能在一个地方看到。
 
 它驱动的是你已经安装并登录的 CLI，所以用的就是你现有的订阅：不需要 API key，
 不需要账号，没有服务器。一切都在你的电脑上运行。
 
-> **状态：早期版本。** 日常配合 Claude Code 使用没有问题。GitHub Copilot CLI
-> 和 Antigravity 的支持已经实现，正在测试中。难免有粗糙的地方。
+> **状态：早期版本。** 日常配合 Claude Code 使用没有问题。其他 agent 的支持
+> 已经实现，正在测试中。难免有粗糙的地方。
 
 ## 下载
 
@@ -54,8 +54,8 @@ Agent Kanban 是一个桌面应用，把 Claude Code、GitHub Copilot CLI 和 An
 
 - **任务就是对话。** 开始一个任务，之后回复它来要求修改：agent 会在同一个会话里
   从上次停下的地方继续。
-- **干活时也能插话。** 在运行中的任务里直接输入：Claude Code 会在下一步就读到，
-  在同一轮里一并处理；其他 agent 在这一轮结束后收到。
+- **干活时也能插话。** 在运行中的任务里直接输入：Claude Code、Grok Build 和 Pi
+  会在下一步就读到，在同一轮里一并处理；其他 agent 在这一轮结束后收到。
 - **每个任务一个分支。** 在 git 仓库中，每个任务都在自己的 worktree 里、
   `kanban/<id>-<title>` 分支上工作，所以 agent 永远不会碰你的工作区，也不会碰彼此的文件。
   每一轮都以一次 commit 结束，Changes 标签页显示 diff，准备好之后点 **Merge**
@@ -100,9 +100,17 @@ Agent Kanban 是一个桌面应用，把 Claude Code、GitHub Copilot CLI 和 An
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | ✅ | ✅ | ✅ |
 | [GitHub Copilot CLI](https://github.com/github/copilot-cli) | 🧪 | 🧪 | 🧪 |
 | Antigravity CLI（`agy`） | 🧪 | — | 🧪 |
+| Grok Build（`grok`） | ✅ | ✅ | ✅ |
+| [Pi](https://pi.dev)（`pi`） | ✅ | ✅ | — |
+| Kimi Code（`kimi`） | ✅ | ✅ | — |
+| [OpenCode](https://opencode.ai)（`opencode`） | ✅ | ✅ | — |
 | [Codex](https://github.com/openai/codex) | 只读查看 | — | ✅ |
 
 ✅ 已测试 · 🧪 已实现，测试中
+
+Grok Build、Pi、Kimi Code 和 OpenCode 运行时使用看板自己的配置：共用你的登录、
+模型服务商和默认模型，但不加载你的规则、hooks、插件、扩展和 MCP 服务器。它们的 token
+按任务统计；目前只有 Grok Build 能显示套餐额度。
 
 ## 开始使用
 

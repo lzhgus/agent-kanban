@@ -17,7 +17,8 @@ const anyAgent = "any"
 
 var agentChoices = append([]string{anyAgent}, agentNames...)
 
-var agentBins = map[string]string{"claude": "claude", "antigravity": "agy", "copilot": "copilot"}
+var agentBins = map[string]string{"claude": "claude", "antigravity": "agy", "copilot": "copilot", "grok": "grok", "pi": "pi",
+	"opencode": "opencode", "kimi": "kimi"}
 
 // installed reports whether an agent's CLI is on PATH.
 // ponytail: a PATH lookup each call; cache it if pickups ever get frequent.

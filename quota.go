@@ -2,8 +2,8 @@ package main
 
 // Subscription quotas: how much of each agent's plan windows (Claude's five
 // hours and week, Copilot's premium requests, Antigravity's weekly limits,
-// Codex's) is used, and when each resets. Claude, Copilot and Antigravity
-// are asked through their CLIs, which costs no model call; Codex is read
+// Grok's weekly credits, Codex's) is used, and when each resets. Claude,
+// Copilot, Antigravity and Grok are asked through their CLIs, which costs no model call; Codex is read
 // from the rate limits it logs on every turn.
 
 import (
@@ -47,6 +47,7 @@ var quotaProbes = map[string]func(ctx context.Context) (*Quota, error){
 	"claude":      probeClaude,
 	"copilot":     probeCopilot,
 	"antigravity": probeAntigravity,
+	"grok":        probeGrok,
 	"codex":       readCodexQuota,
 }
 
@@ -55,7 +56,7 @@ var quotaProbes = map[string]func(ctx context.Context) (*Quota, error){
 func probeQuotas() map[string]*Quota {
 	out := map[string]*Quota{}
 	for name, probe := range quotaProbes {
-		bin := map[string]string{"claude": "claude", "copilot": "copilot", "antigravity": "agy"}[name]
+		bin := agentBins[name]
 		if _, err := exec.LookPath(bin); bin != "" && err != nil {
 			continue
 		}
@@ -220,6 +221,80 @@ func parseCopilotQuota(raw json.RawMessage) (*Quota, error) {
 		}
 		reset, _ := time.Parse(time.RFC3339, s.Reset)
 		q.Windows = append(q.Windows, Window{Label: label, Used: pct(100 - *s.Remaining), ResetsAt: reset})
+	}
+	return q, nil
+}
+
+// ── Grok Build ──────────────────────────────────────────────────────────────
+// Its ACP server tells the plan (_x.ai/auth/check_subscription) and how much
+// of the week's credits it used (_x.ai/billing).
+
+func probeGrok(ctx context.Context) (*Quota, error) {
+	home, err := grokHome()
+	if err != nil {
+		return nil, err
+	}
+	c, stop, stderr, err := grok.start(ctx, os.TempDir(), "", grokEnv(home), func(string, json.RawMessage) {})
+	if err != nil {
+		return nil, err
+	}
+	defer stop()
+	var sub, billing json.RawMessage
+	for _, call := range []struct {
+		method string
+		out    *json.RawMessage
+	}{{"initialize", nil}, {"_x.ai/auth/check_subscription", &sub}, {"_x.ai/billing", &billing}} {
+		var params any = map[string]any{}
+		if call.method == "initialize" {
+			params = acpInitialize
+		}
+		var out any
+		if call.out != nil {
+			out = call.out
+		}
+		if err := c.call(ctx, call.method, params, out); err != nil {
+			return nil, exitErr(err, stderr)
+		}
+	}
+	return parseGrokBilling(sub, billing)
+}
+
+func parseGrokBilling(sub, billing json.RawMessage) (*Quota, error) {
+	var s struct {
+		Authenticated bool `json:"authenticated"`
+		Meta          struct {
+			Tier string `json:"subscription_tier"`
+		} `json:"meta"`
+	}
+	var b struct {
+		Tier   string `json:"subscription_tier"`
+		Config struct {
+			Credits *float64 `json:"creditUsagePercent"`
+			Period  struct {
+				End string `json:"end"`
+			} `json:"currentPeriod"`
+			Cap struct {
+				Val float64 `json:"val"`
+			} `json:"onDemandCap"`
+			Used struct {
+				Val float64 `json:"val"`
+			} `json:"onDemandUsed"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(sub, &s); err != nil {
+		return nil, err
+	}
+	if !s.Authenticated {
+		return nil, errors.New("not signed in: run grok login")
+	}
+	json.Unmarshal(billing, &b)
+	q := &Quota{Plan: cmp.Or(b.Tier, s.Meta.Tier), At: time.Now()}
+	end, _ := time.Parse(time.RFC3339, b.Config.Period.End)
+	if c := b.Config.Credits; c != nil {
+		q.Windows = append(q.Windows, Window{Label: "Week", Used: pct(*c), ResetsAt: end})
+	}
+	if b.Config.Cap.Val > 0 {
+		q.Windows = append(q.Windows, Window{Label: "On demand", Used: pct(b.Config.Used.Val / b.Config.Cap.Val * 100), ResetsAt: end})
 	}
 	return q, nil
 }

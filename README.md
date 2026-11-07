@@ -27,18 +27,19 @@
   <sub>20-second promo (mocked data). <a href="site/media/promo-en.mp4">MP4 version</a> · <a href="https://agent-kanban.lzhgus.com/demo/">interactive version</a></sub>
 </p>
 
-Agent Kanban is a desktop app that runs Claude Code, GitHub Copilot CLI and
-Antigravity as tasks on a kanban board. Each task works on its own git
-branch. Agents can plan before they build, review each other's work, ask you
-questions and file tasks for one another, and you see every agent's progress,
-token usage and plan quota in one place.
+Agent Kanban is a desktop app that runs Claude Code, GitHub Copilot CLI,
+Antigravity, Grok Build, Pi, Kimi Code and OpenCode as tasks on a kanban
+board. Each task works on its own git branch. Agents can plan before they
+build, review each other's work, ask you questions and file tasks for one
+another, and you see every agent's progress, token usage and plan quota in
+one place.
 
 It drives the CLIs you have installed and signed in to, so it uses your
 existing subscriptions: no API keys, no account, no server. Everything runs on
 your machine.
 
-> **Status: early.** It works day to day with Claude Code. GitHub Copilot CLI
-> and Antigravity support is implemented and being tested. Expect rough edges.
+> **Status: early.** It works day to day with Claude Code. Support for the
+> other agents is implemented and being tested. Expect rough edges.
 
 ## Download
 
@@ -58,9 +59,9 @@ it supports, installed and signed in. You don't need Go unless you
 
 - **Tasks are conversations.** Start a task, then reply to it to ask for
   changes: the agent picks up where it stopped, in the same session.
-- **Talk to it while it works.** Type into a running task: Claude Code reads
-  your message at its next step, in the same turn; other agents get it when
-  their turn ends.
+- **Talk to it while it works.** Type into a running task: Claude Code,
+  Grok Build and Pi read your message at their next step, in the same turn;
+  other agents get it when their turn ends.
 - **A branch per task.** In a git repository, every task works in its own
   worktree on a `kanban/<id>-<title>` branch, so agents never touch your
   checkout or each other's files. Each turn ends in a commit, the Changes tab
@@ -120,9 +121,18 @@ it supports, installed and signed in. You don't need Go unless you
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | ✅ | ✅ | ✅ |
 | [GitHub Copilot CLI](https://github.com/github/copilot-cli) | 🧪 | 🧪 | 🧪 |
 | Antigravity CLI (`agy`) | 🧪 | — | 🧪 |
+| Grok Build (`grok`) | ✅ | ✅ | ✅ |
+| [Pi](https://pi.dev) (`pi`) | ✅ | ✅ | — |
+| Kimi Code (`kimi`) | ✅ | ✅ | — |
+| [OpenCode](https://opencode.ai) (`opencode`) | ✅ | ✅ | — |
 | [Codex](https://github.com/openai/codex) | watched read-only | — | ✅ |
 
 ✅ tested · 🧪 implemented, being tested
+
+Grok Build, Pi, Kimi Code and OpenCode run with config of the board's own:
+they share your sign-in, providers and default model, but not your rules,
+hooks, plugins, extensions or MCP servers. Their tokens are counted per task;
+only Grok Build has a plan quota to show.
 
 ## Getting started
 

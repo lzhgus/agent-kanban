@@ -339,3 +339,57 @@ func TestEvalScheduleRevert(t *testing.T) {
 		t.Errorf("the agent says %q", task.Result)
 	}
 }
+
+// The agents past Claude Code, each on its own default model: a question
+// through the board's MCP server whose answer resumes the conversation,
+// edits committed, and a message while it works, which joins the turn for
+// an agent that takes one and waits for the next turn otherwise.
+func TestEvalAgents(t *testing.T) {
+	for _, agent := range []string{"grok", "pi", "kimi", "opencode"} {
+		t.Run(agent, func(t *testing.T) {
+			if _, err := exec.LookPath(agentBins[agent]); err != nil {
+				t.Skip("no " + agent + " on PATH")
+			}
+			repo := testRepo(t)
+			b, main, w := evalBoard(t, "", t.TempDir())
+			add := func(prompt string) *Task {
+				b.dir, b.prompt, b.agent, b.model = repo, prompt, agent, ""
+				b.add(true)
+				return b.Tasks[len(b.Tasks)-1]
+			}
+			task := add("Use the ask_user tool of the kanban MCP server to ask me which color I want, red or blue, then end your turn. " +
+				"Once I answer, write my answer, one word, to color.txt.")
+			pump(t, main, settledOf(task), 5*time.Minute)
+			t.Logf("log:\n%s", logOf(task))
+			if task.Question == nil || len(w.notices) != 1 || task.SessionRef == "" {
+				t.Fatalf("%s %q: question %+v, notices %+v", task.Status, task.Err, task.Question, w.notices)
+			}
+			if !strings.Contains(logOf(task), "▸ kanban/ask_user") {
+				t.Errorf("the question's tool call is not logged as kanban/ask_user")
+			}
+			session := task.SessionRef
+			b.reply(task, "blue")
+			pump(t, main, settledOf(task), 5*time.Minute)
+			t.Logf("log:\n%s", logOf(task))
+			if got := read(filepath.Join(task.WS.Dir(), "color.txt")); task.Status != Review || got != "blue" || task.SessionRef != session {
+				t.Errorf("%s %q: color.txt %q, session %s → %s", task.Status, task.Err, got, session, task.SessionRef)
+			}
+			if task.Usage.total() == 0 || task.Changes.Files != 1 {
+				t.Errorf("usage %+v, changes %+v", task.Usage, task.Changes)
+			}
+
+			live := add("Run `sleep 3` with your shell tool, three separate times, one call each. Then create done.txt containing done. Reply with one short sentence.")
+			pump(t, main, func() bool { return strings.Contains(logOf(live), "▸ Bash sleep") }, 5*time.Minute)
+			said := b.say(live, "Also create extra.txt containing extra.", "")
+			pump(t, main, settledOf(live), 5*time.Minute)
+			t.Logf("log:\n%s", logOf(live))
+			dir := live.WS.Dir()
+			if live.Status != Review || read(filepath.Join(dir, "done.txt")) != "done" || read(filepath.Join(dir, "extra.txt")) != "extra" {
+				t.Errorf("%s %q", live.Status, live.Err)
+			}
+			if liveAgents[agent] && (said != saidLive || live.Runs != 1) || !liveAgents[agent] && live.Runs != 2 || len(live.Asides) != 0 {
+				t.Errorf("said %q, %d turns, asides %v", said, live.Runs, live.Asides)
+			}
+		})
+	}
+}
