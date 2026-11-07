@@ -46,7 +46,7 @@ your machine.
 **[Download the latest release](https://github.com/lzhgus/agent-kanban/releases/latest)** for macOS: a signed and
 notarized universal app (Apple Silicon and Intel) for macOS 12 or newer,
 about 10 MB. The current version is
-[`agent-kanban-0.1.2.dmg`](https://github.com/lzhgus/agent-kanban/releases/download/v0.1.2/agent-kanban-0.1.2.dmg).
+[`agent-kanban-0.1.3.dmg`](https://github.com/lzhgus/agent-kanban/releases/download/v0.1.3/agent-kanban-0.1.3.dmg).
 
 1. Open the DMG and drag **Agent Kanban** to Applications.
 2. Open it from Applications, the Dock or Spotlight.
