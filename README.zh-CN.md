@@ -35,8 +35,10 @@ git 分支上工作。agent 可以先计划再动手、互相审查对方的工�
 它驱动的是你已经安装并登录的 CLI，所以用的就是你现有的订阅：不需要 API key，
 不需要账号，没有服务器。一切都在你的电脑上运行。
 
-> **状态：早期版本。** 日常配合 Claude Code 使用没有问题。其他 agent 的支持
-> 已经实现，正在测试中。难免有粗糙的地方。
+> **状态：早期版本（0.1.x）。** Claude Code 日常在用；Grok Build、Pi、Kimi Code
+> 和 OpenCode 已通过对真实 CLI 的端到端检查；GitHub Copilot CLI 和 Antigravity
+> 已经实现、正在测试；Codex 会话只读查看。难免有粗糙的地方，遇到问题请
+> [提 issue](https://github.com/lzhgus/agent-kanban/issues)。
 
 ## 下载
 
@@ -46,6 +48,12 @@ git 分支上工作。agent 可以先计划再动手、互相审查对方的工�
 
 1. 打开 DMG，把 **Agent Kanban** 拖进“应用程序”文件夹。
 2. 从“应用程序”、Dock 或 Spotlight 打开。
+
+也可以用 [Homebrew](https://github.com/lzhgus/homebrew-tap) 安装：
+
+```sh
+brew install --cask lzhgus/tap/agent-kanban
+```
 
 你仍然需要 git，以及至少一个它支持的 [agent CLI](#支持的-agent)（已安装并登录）。
 除非[从源码构建](#从源码构建)，否则不需要安装 Go。
@@ -112,6 +120,26 @@ git 分支上工作。agent 可以先计划再动手、互相审查对方的工�
 Grok Build、Pi、Kimi Code 和 OpenCode 运行时使用看板自己的配置：共用你的登录、
 模型服务商和默认模型，但不加载你的规则、hooks、插件、扩展和 MCP 服务器。它们的 token
 按任务统计；目前只有 Grok Build 能显示套餐额度。
+
+## 和同类项目对比
+
+我们知道的最接近的项目是 [Vibe Kanban](https://github.com/BloopAI/vibe-kanban)。
+两者都把 coding agent 放到看板上，每个任务一个 git 分支。下面的差异来自
+Vibe Kanban 自己的 README 和文档（截至 2026-11-13），不是上手实测；有不准确的地方欢迎指正。
+
+| | Agent Kanban | Vibe Kanban |
+|---|---|---|
+| 许可证 | MIT | Apache-2.0 |
+| 运行方式 | 原生 macOS 应用（已签名 DMG） | 在终端运行 `npx vibe-kanban` |
+| Agent | Claude Code、Grok Build、Pi、Kimi Code、OpenCode；Copilot CLI 和 Antigravity 测试中；Codex 只读查看 | Claude Code、Codex、Gemini CLI、GitHub Copilot、Amp、Cursor、OpenCode、Droid、CCR、Qwen Code |
+| 每个任务 | 一个 git worktree 和 `kanban/<id>-<title>` 分支 | 一个带分支、终端和 dev server 的 workspace |
+| 审查 | 由另一个 agent 审查计划或改动，循环到通过 | 看 diff、写行内评论，再开 PR |
+| agent 协作 | 通过内置 MCP server 派子任务、发消息、提问 | — |
+| 用量 | 每个任务的 token 和每个 agent 的套餐额度 | — |
+| 其他 | 定时任务、撤销一轮、终端会话只读显示 | 内置带 devtools 的浏览器预览；自动生成描述的 PR |
+| 项目状态 | 早期，0.1.x | 其 README 写明项目正在停止维护（sunsetting） |
+
+“—”表示我们在对方文档里没找到，不代表没有。
 
 ## 开始使用
 

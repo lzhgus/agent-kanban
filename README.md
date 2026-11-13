@@ -38,8 +38,12 @@ It drives the CLIs you have installed and signed in to, so it uses your
 existing subscriptions: no API keys, no account, no server. Everything runs on
 your machine.
 
-> **Status: early.** It works day to day with Claude Code. Support for the
-> other agents is implemented and being tested. Expect rough edges.
+> **Status: early (0.1.x).** Claude Code is used day to day. Grok Build, Pi,
+> Kimi Code and OpenCode pass the end-to-end checks against their real CLIs.
+> GitHub Copilot CLI and Antigravity are implemented and being tested, and
+> Codex sessions are watched read-only. Expect rough edges, and please
+> [open an issue](https://github.com/lzhgus/agent-kanban/issues) when
+> something breaks.
 
 ## Download
 
@@ -50,6 +54,12 @@ about 10 MB. The current version is
 
 1. Open the DMG and drag **Agent Kanban** to Applications.
 2. Open it from Applications, the Dock or Spotlight.
+
+Or with [Homebrew](https://github.com/lzhgus/homebrew-tap):
+
+```sh
+brew install --cask lzhgus/tap/agent-kanban
+```
 
 You still need git and at least one of the [agent CLIs](#supported-agents)
 it supports, installed and signed in. You don't need Go unless you
@@ -133,6 +143,27 @@ Grok Build, Pi, Kimi Code and OpenCode run with config of the board's own:
 they share your sign-in, providers and default model, but not your rules,
 hooks, plugins, extensions or MCP servers. Their tokens are counted per task;
 only Grok Build has a plan quota to show.
+
+## How it compares
+
+The closest project we know of is [Vibe Kanban](https://github.com/BloopAI/vibe-kanban).
+Both put coding agents on a kanban board with a git branch per task. The
+differences below come from Vibe Kanban's own README and docs as of
+2026-11-13, not from hands-on testing; corrections are welcome.
+
+| | Agent Kanban | Vibe Kanban |
+|---|---|---|
+| License | MIT | Apache-2.0 |
+| How you run it | Native macOS app (signed DMG) | `npx vibe-kanban` from a terminal |
+| Agents | Claude Code, Grok Build, Pi, Kimi Code, OpenCode; Copilot CLI and Antigravity in testing; Codex watched read-only | Claude Code, Codex, Gemini CLI, GitHub Copilot, Amp, Cursor, OpenCode, Droid, CCR, Qwen Code |
+| Per task | A git worktree and `kanban/<id>-<title>` branch | A workspace with a branch, a terminal and a dev server |
+| Review | Another agent reviews a plan or changes, in a loop | Diff review with inline comments, then a pull request |
+| Agents working together | Subtasks, messages and questions through a built-in MCP server | — |
+| Usage | Tokens per task and each agent's plan quota | — |
+| Extras | Schedules, undo a turn, terminal sessions shown read-only | Built-in browser preview with devtools; PRs with generated descriptions |
+| Project status | Early, 0.1.x | Its README says the project is sunsetting |
+
+"—" means we did not find it in their docs, not that it is missing.
 
 ## Getting started
 
