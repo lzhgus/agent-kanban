@@ -7,15 +7,18 @@ package main
 // A folder outside git runs in place, as before, with no diff.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Workspace is where a task's agent works.
@@ -274,4 +277,123 @@ func (w *Workspace) merge(title string) error {
 		return fmt.Errorf("%s conflicts with %s: ask the agent to merge %s into its branch and resolve them", w.Branch, w.Base, w.Base)
 	}
 	return err
+}
+
+// setupScript is what readies a new worktree, if your checkout has it: it
+// runs there, with AGENT_KANBAN_SOURCE set to your checkout.
+const setupScript = ".agent-kanban/setup.sh"
+
+// prepare readies a new worktree with what git leaves out of it: the
+// ignored files that your checkout's .worktreeinclude names (gitignore
+// patterns, .env files if it has none) are copied in, and setupScript runs.
+// A failure is logged, not fatal: the agent can still work, or fix it.
+func (w *Workspace) prepare(ctx context.Context, log emit) {
+	which := []string{"--exclude=.env", "--exclude=.env.*"}
+	if fileExists(filepath.Join(w.Repo, ".worktreeinclude")) {
+		which = []string{"--exclude-from=" + filepath.Join(w.Repo, ".worktreeinclude")}
+	}
+	out, _ := git(w.Repo, append([]string{"ls-files", "-z", "--others", "--ignored", "--directory"}, which...)...)
+	var copied []string
+	for _, rel := range strings.Split(out, "\x00") {
+		rel = strings.TrimSuffix(rel, "/")
+		if rel == "" {
+			continue
+		}
+		src, dst := filepath.Join(w.Repo, rel), filepath.Join(w.Worktree, rel)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			log("✗ copying " + rel + ": " + err.Error())
+			continue
+		}
+		var out []byte
+		err := errors.New("")
+		if runtime.GOOS == "darwin" { // a clone: instant, and no space taken, on one volume
+			out, err = exec.Command("cp", "-cR", src, dst).CombinedOutput()
+		}
+		if err != nil {
+			os.RemoveAll(dst) // what a clone that failed halfway left
+			out, err = exec.Command("cp", "-R", src, dst).CombinedOutput()
+		}
+		if err != nil {
+			log("✗ copying " + rel + ": " + firstLine(strings.TrimSpace(string(out))))
+		} else {
+			copied = append(copied, rel)
+		}
+	}
+	if len(copied) > 0 {
+		log("── copied from your checkout: " + strings.Join(copied, ", "))
+	}
+	script := filepath.Join(w.Repo, setupScript)
+	if !fileExists(script) {
+		return
+	}
+	log("── running " + setupScript)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/bin/sh", script)
+	cmd.Dir, cmd.Env = w.Worktree, append(os.Environ(), "AGENT_KANBAN_SOURCE="+w.Repo)
+	out2, err := cmd.CombinedOutput()
+	if s := strings.TrimSpace(string(out2)); s != "" {
+		lines := strings.Split(s, "\n")
+		log(strings.Join(lines[max(0, len(lines)-20):], "\n")) // its tail: the end says what happened
+	}
+	if err != nil {
+		log("✗ " + setupScript + ": " + err.Error())
+	}
+}
+
+// publish pushes the branch to origin and gives the URL of its open pull
+// request into the base, which gh opens if there is none yet.
+// ponytail: origin, and the repository gh picks; a fork's upstream is not asked.
+func (w *Workspace) publish(title, body string) (string, error) {
+	if w.Base == "" {
+		return "", errors.New("the task forked from a detached HEAD: there is no branch to open a pull request into")
+	}
+	if _, err := exec.LookPath("gh"); err != nil {
+		return "", errors.New("it takes the GitHub CLI: install gh and run `gh auth login`")
+	}
+	if _, err := git(w.Worktree, "push", "--quiet", "-u", "origin", w.Branch); err != nil {
+		return "", err
+	}
+	gh := func(args ...string) (string, error) {
+		cmd := exec.Command("gh", args...)
+		cmd.Dir = w.Worktree
+		out, err := cmd.Output()
+		if err != nil {
+			var exit *exec.ExitError
+			if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+				err = errors.New(firstLine(strings.TrimSpace(string(exit.Stderr))))
+			}
+			return "", fmt.Errorf("gh pr %s: %w", args[1], err)
+		}
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		return lines[len(lines)-1], nil
+	}
+	if url, err := gh("pr", "view", w.Branch, "--json", "url,state", "-q", `select(.state == "OPEN").url`); err == nil && url != "" {
+		return url, nil // the push updated it
+	}
+	return gh("pr", "create", "--head", w.Branch, "--base", w.Base, "--title", title, "--body", body)
+}
+
+// opener is the app that opens a folder for you, as an editor or a
+// terminal: the first of apps installed, or else fallback.
+func opener(fallback string, apps ...string) string {
+	home, _ := os.UserHomeDir()
+	for _, app := range apps {
+		for _, dir := range []string{"/Applications", filepath.Join(home, "Applications")} {
+			if fileExists(filepath.Join(dir, app+".app")) {
+				return app
+			}
+		}
+	}
+	return fallback
+}
+
+var (
+	editorApp   = sync.OnceValue(func() string { return opener("Finder", "Cursor", "Visual Studio Code", "Zed", "Windsurf") })
+	terminalApp = sync.OnceValue(func() string { return opener("Terminal", "iTerm") })
+)
+
+// openIn opens a folder in an app.
+func openIn(app, dir string) error {
+	return exec.Command("open", "-a", app, dir).Run()
 }

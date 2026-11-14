@@ -69,6 +69,13 @@ brew install --cask lzhgus/tap/agent-kanban
   每一轮都以一次 commit 结束，Changes 标签页显示 diff，准备好之后点 **Merge**
   把它合并进你的分支。鼠标移到 diff 里的某处改动上，点 **Revert**，
   就只把这一处改动从分支上撤掉。
+- **开箱即用的 worktree。** 新 worktree 会带上 git 不管的被忽略文件：默认是你的
+  `.env` 文件，或者仓库根目录 `.worktreeinclude` 里列出的（gitignore 写法，可以包括
+  `node_modules/`）。如果你的仓库里有 `.agent-kanban/setup.sh`，它会在新 worktree 里运行，
+  `AGENT_KANBAN_SOURCE` 指向你的工作区。
+- **Pull request。** 点 **Open PR**，用 GitHub CLI（`gh`）推送任务的分支并开一个 PR，
+  描述里写着你提的需求和 agent 做了什么；之后又跑了几轮，点 **Update PR** 再推一次。
+  文件夹旁边的两个按钮可以在你的编辑器或终端里打开任务的 worktree。
 - **先计划。** 任务可以从一轮只读的计划开始。计划会等你确认或修改之后，才会改动任何代码。
 - **AI 审查。** 在计划阶段或改动完成后，可以让另一个 agent 来审查。任务的 agent 根据意见修改，
   循环进行，直到审查者通过或你设定的轮数用完。最终决定权在你。

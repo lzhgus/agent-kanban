@@ -78,6 +78,15 @@ it supports, installed and signed in. You don't need Go unless you
   shows the diff, and **Merge** brings it into your branch when you are ready.
   Hover a change in the diff and click **Revert** to take just that change
   off the branch.
+- **Ready to run.** A new worktree gets the ignored files git leaves
+  behind: your `.env` files, or what a `.worktreeinclude` at the top of your
+  repository names (gitignore patterns, `node_modules/` included). Then
+  `.agent-kanban/setup.sh` runs in it, if your checkout has one, with
+  `AGENT_KANBAN_SOURCE` set to your checkout.
+- **Pull requests.** **Open PR** pushes the task's branch and opens a pull
+  request with the GitHub CLI (`gh`), described with what you asked and what
+  the agent did; after more turns, **Update PR** pushes again. The two
+  buttons by the folder open the task's worktree in your editor or terminal.
 - **Plan first.** A task can start with a read-only planning turn. The plan
   waits for you to confirm or revise it before any code changes.
 - **AI review.** At a plan or at finished changes, have another agent review.
