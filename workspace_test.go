@@ -147,6 +147,8 @@ func TestBoardWorktree(t *testing.T) {
 	saved := drivers
 	drivers = map[string]driver{"claude": func(ctx context.Context, task Task, log emit) (result, error) {
 		os.WriteFile(filepath.Join(task.Dir, "NOTES.md"), []byte("turn "+task.Prompt+"\n"), 0o644)
+		log(toolLine("Read", map[string]any{"file_path": filepath.Join(task.Dir, strings.Repeat("d/", 100)+"x")})) // shortened, then clipped
+		log(toolLine("Write", map[string]any{"file_path": filepath.Join(task.Dir, "NOTES.md")}))
 		return result{Text: "wrote notes", SessionRef: task.SessionRef}, nil
 	}}
 	defer func() { drivers = saved }()
@@ -167,7 +169,8 @@ func TestBoardWorktree(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repo, "NOTES.md")); err == nil {
 		t.Fatal("the agent wrote in your checkout")
 	}
-	if !strings.Contains(strings.Join(task.Log, "\n"), "── branch kanban/1-notes") {
+	if log := strings.Join(task.Log, "\n"); !strings.Contains(log, "── branch kanban/1-notes") || !strings.HasSuffix(log, "\n▸ Write NOTES.md") ||
+		!strings.Contains(log, "\n▸ Read d/d/d/") {
 		t.Errorf("log %q", task.Log)
 	}
 
@@ -201,5 +204,106 @@ func TestBoardWorktree(t *testing.T) {
 	}
 	if _, err := os.Stat(old); err == nil {
 		t.Error("start over left the old worktree")
+	}
+}
+
+func TestPrepare(t *testing.T) {
+	repo, root := testRepo(t), t.TempDir()
+	os.WriteFile(filepath.Join(repo, ".gitignore"), []byte(".env*\nnode_modules/\n*.log\n"), 0o644)
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "ignore")
+	for _, f := range []string{".env", "app/.env.local", "node_modules/a/x.js", "app/debug.log"} {
+		os.MkdirAll(filepath.Dir(filepath.Join(repo, f)), 0o755)
+		os.WriteFile(filepath.Join(repo, f), []byte(f), 0o644)
+	}
+	open := func(id int) (*Workspace, string) {
+		t.Helper()
+		ws, _, err := openWorkspace(repo, root, id, "x")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var lines []string
+		ws.prepare(context.Background(), func(l string) { lines = append(lines, l) })
+		return ws, strings.Join(lines, "\n")
+	}
+	has := func(ws *Workspace, f string) bool { return fileExists(filepath.Join(ws.Worktree, f)) }
+
+	// By default the .env files come along, and nothing else ignored.
+	ws, log := open(1)
+	if !has(ws, ".env") || !has(ws, "app/.env.local") || has(ws, "node_modules") || has(ws, "app/debug.log") {
+		t.Errorf("default copy, log %q", log)
+	}
+	if got, _ := os.ReadFile(filepath.Join(ws.Worktree, "app/.env.local")); string(got) != "app/.env.local" {
+		t.Errorf("copied %q", got)
+	}
+
+	// .worktreeinclude says what, folders whole; the setup script runs in
+	// the worktree, told where your checkout is.
+	os.WriteFile(filepath.Join(repo, ".worktreeinclude"), []byte("node_modules/\n.env\n"), 0o644)
+	os.MkdirAll(filepath.Join(repo, ".agent-kanban"), 0o755)
+	os.WriteFile(filepath.Join(repo, setupScript), []byte("echo set up in \"$(basename \"$PWD\")\" from \"$AGENT_KANBAN_SOURCE\"\nexit 3\n"), 0o644)
+	ws, log = open(2)
+	if !has(ws, "node_modules/a/x.js") || !has(ws, ".env") || has(ws, "app/.env.local") {
+		t.Errorf(".worktreeinclude copy, log %q", log)
+	}
+	if !strings.Contains(log, "set up in "+filepath.Base(ws.Worktree)+" from "+ws.Repo) || !strings.Contains(log, "✗ "+setupScript+": exit status 3") {
+		t.Errorf("setup log %q", log)
+	}
+}
+
+func TestPublish(t *testing.T) {
+	repo, root := testRepo(t), t.TempDir()
+	origin := t.TempDir()
+	gitT(t, origin, "init", "-q", "--bare")
+	gitT(t, repo, "remote", "add", "origin", origin)
+	ws, _, err := openWorkspace(repo, root, 3, "Fix it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(ws.Worktree, "fix.txt"), []byte("fixed\n"), 0o644)
+	if _, err := ws.checkpoint("claude", "fix"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A fake gh: no pull request until one is created.
+	bin, calls := t.TempDir(), filepath.Join(t.TempDir(), "calls")
+	os.WriteFile(filepath.Join(bin, "gh"), []byte(`#!/bin/sh
+echo "$@" >> "`+calls+`"
+case "$2" in
+view) [ -f "`+calls+`.pr" ] && echo https://github.com/o/r/pull/1 && exit 0; echo "no pull requests found" >&2; exit 1 ;;
+create) touch "`+calls+`.pr"; echo "Warning: 1 uncommitted change"; echo https://github.com/o/r/pull/1 ;;
+esac
+`), 0o755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	url, err := ws.publish("Fix it", "body")
+	if err != nil || url != "https://github.com/o/r/pull/1" {
+		t.Fatalf("create: %q %v", url, err)
+	}
+	if sha, _ := git(origin, "rev-parse", ws.Branch); sha != gitT(t, ws.Worktree, "rev-parse", "HEAD") {
+		t.Errorf("origin has %q", sha)
+	}
+	got, _ := os.ReadFile(calls)
+	if !strings.Contains(string(got), "pr create --head "+ws.Branch+" --base main --title Fix it --body body") {
+		t.Errorf("gh calls %s", got)
+	}
+	// Again: it pushes and finds the one open.
+	os.WriteFile(filepath.Join(ws.Worktree, "fix.txt"), []byte("fixed again\n"), 0o644)
+	ws.checkpoint("claude", "more")
+	os.Remove(calls)
+	if url, err := ws.publish("Fix it", "body"); err != nil || url != "https://github.com/o/r/pull/1" {
+		t.Fatalf("update: %q %v", url, err)
+	}
+	if got, _ := os.ReadFile(calls); strings.Contains(string(got), "create") {
+		t.Errorf("created again: %s", got)
+	}
+	if sha, _ := git(origin, "rev-parse", ws.Branch); sha != gitT(t, ws.Worktree, "rev-parse", "HEAD") {
+		t.Errorf("not pushed again: %q", sha)
+	}
+
+	// Without gh it says what it takes.
+	t.Setenv("PATH", t.TempDir())
+	if _, err := ws.publish("Fix it", "body"); err == nil || !strings.Contains(err.Error(), "gh auth login") {
+		t.Errorf("no gh: %v", err)
 	}
 }

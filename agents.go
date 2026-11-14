@@ -164,7 +164,7 @@ func toolLine(name string, args map[string]any) string {
 	name = toolName(name)
 	for _, k := range []string{"command", "file_path", "filePath", "path", "pattern", "url", "query", "description"} {
 		if v, ok := args[k].(string); ok && v != "" {
-			return "▸ " + name + " " + firstLine(v)
+			return "▸ " + name + " " + oneLine(v) // clipped once logged: a path in the task's folder shortened first
 		}
 	}
 	return "▸ " + name
@@ -203,11 +203,10 @@ func toolName(name string) string {
 	return name
 }
 
-func firstLine(s string) string {
+func firstLine(s string) string { return clip(oneLine(s), 160) }
+
+func oneLine(s string) string {
 	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
-	if len(s) > 160 {
-		s = s[:160] + "…"
-	}
 	return s
 }
 

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const bridgeName = "kanban" // the MCP server's name: Claude Code calls its tools mcp__kanban__<tool>
@@ -569,9 +570,13 @@ func describe(t *Task) string {
 	return s.String()
 }
 
+// clip cuts s to n bytes, on a rune's boundary.
 func clip(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n] + "…"
 }

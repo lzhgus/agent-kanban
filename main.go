@@ -70,6 +70,7 @@ type Task struct {
 	WS      *Workspace
 	Changes Changes // its branch against its base, after the last turn
 	Merged  bool
+	PR      string // the URL of its branch's pull request, once you opened one
 	// Plan first: a read-only turn writes a plan, which waits at Confirm
 	// for you before the agent builds it.
 	PlanFirst bool
@@ -119,6 +120,7 @@ type Task struct {
 	inbox    <-chan string // messages while the turn runs, for a live agent (the drivers' copy only)
 	merging  bool
 	undoing  bool
+	pushing  bool
 	rev      *reviewLoop // the AI review going on, if one is
 	pending  *queuedTurn // the turn waiting in the queue
 	mcpURL   string      // the board's MCP server for this turn (the drivers' copy only)
@@ -678,13 +680,22 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 	go func() {
 		defer b.procs.Done()
 		defer closeBridge()
-		log := func(line string) { b.update(func() { t.addLog(line) }) }
+		var trim []string // the turn's folder as agents write it: tool lines show paths in it relative
+		log := func(line string) {
+			if strings.HasPrefix(line, "▸ ") {
+				for _, d := range trim {
+					line = strings.ReplaceAll(line, d, "")
+				}
+				line = clip(line, 160)
+			}
+			b.update(func() { t.addLog(line) })
+		}
 		if drop != nil {
 			drop.remove()
 		}
 		var err error
 		if ws != nil || (o.reviewer == "" && !t.InPlace) { // a review uses the task's worktree, or its folder
-			ws, err = b.workspace(ws, task, log)
+			ws, err = b.workspace(ctx, ws, task, log)
 		}
 		if err != nil {
 			b.update(func() { b.finish(t, result{}, err, time.Since(began), before, o, turnGit{}, task) })
@@ -695,6 +706,7 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 			task.Dir = ws.Dir()
 			head, _ = git(ws.Worktree, "rev-parse", "HEAD")
 		}
+		trim = spellings(task.Dir)
 		r, err := drive(ctx, task, log)
 		if ctx.Err() != nil {
 			err = ctx.Err() // a stopped agent reports its kill ("signal: killed"), not why
@@ -713,8 +725,9 @@ func (b *board) turn(t *Task, prompt string, o turnOpts) {
 }
 
 // workspace readies the turn's worktree: the task's own, brought back if it
-// was deleted, or a new one for its first turn. It runs off the main thread.
-func (b *board) workspace(ws *Workspace, task Task, log emit) (*Workspace, error) {
+// was deleted, or a new one for its first turn, prepared. It runs off the
+// main thread.
+func (b *board) workspace(ctx context.Context, ws *Workspace, task Task, log emit) (*Workspace, error) {
 	if ws != nil {
 		return ws, ws.ensure()
 	}
@@ -729,6 +742,7 @@ func (b *board) workspace(ws *Workspace, task Task, log emit) (*Workspace, error
 		return nil, err
 	}
 	log("── branch " + ws.Branch + " in " + ws.Worktree)
+	ws.prepare(ctx, log)
 	w := *ws
 	b.update(func() {
 		for _, t := range b.Tasks {
@@ -814,6 +828,40 @@ func (b *board) merge(t *Task) {
 			} else {
 				t.Status, t.Err, t.Merged = Done, "", true
 				t.addLog("── merged " + ws.Branch + " into " + ws.Base)
+			}
+			b.save()
+		})
+	}()
+}
+
+// publish pushes the task's branch and opens a pull request for it, or
+// updates the one open, and shows it in your browser. Its description is
+// what you asked for and the agent's last report.
+func (b *board) publish(t *Task) {
+	if t.WS == nil || t.pushing || t.merging || t.undoing || started(t) {
+		return
+	}
+	t.pushing = true
+	ws, title := *t.WS, t.Title
+	body := "## Request\n\n" + t.Prompt
+	if r := strings.TrimSpace(t.Result); r != "" {
+		body += "\n\n## What " + t.Agent + " did\n\n" + r
+	}
+	go func() {
+		url, err := ws.publish(title, body)
+		if err == nil {
+			exec.Command("open", url).Run()
+		}
+		b.update(func() {
+			t.pushing = false
+			if err != nil {
+				t.Err = "pull request: " + err.Error()
+				t.addLog("✗ " + t.Err)
+			} else {
+				if t.PR != url {
+					t.addLog("── pull request " + url)
+				}
+				t.PR, t.Err = url, ""
 			}
 			b.save()
 		})

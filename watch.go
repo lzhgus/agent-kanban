@@ -265,6 +265,9 @@ func (f *claudeFile) recent(line string) {
 }
 
 func appendRecent(lines []string, line string) []string {
+	if strings.HasPrefix(line, "▸ ") {
+		line = clip(line, 160)
+	}
 	lines = append(lines, line)
 	if n := len(lines) - recentLines; n > 0 {
 		lines = slices.Delete(lines, 0, n)

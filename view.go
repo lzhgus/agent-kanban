@@ -102,18 +102,21 @@ func lucide(paths string) *ui.SVG {
 }
 
 var (
-	iconPlus   = lucide(`<path d="M5 12h14"/><path d="M12 5v14"/>`)
-	iconX      = lucide(`<path d="M18 6 6 18"/><path d="m6 6 12 12"/>`)
-	iconPlay   = lucide(`<polygon points="6 3 20 12 6 21 6 3"/>`)
-	iconStop   = lucide(`<rect width="14" height="14" x="5" y="5" rx="2"/>`)
-	iconTrash  = lucide(`<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>`)
-	iconArrow  = lucide(`<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>`)
-	iconEye    = lucide(`<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>`)
-	iconFolder = lucide(`<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>`)
-	iconKanban = lucide(`<path d="M6 5v11"/><path d="M12 5v6"/><path d="M18 5v14"/>`)
-	iconMerge  = lucide(`<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/>`)
-	iconRepeat = lucide(`<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>`)
-	iconBranch = lucide(`<line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>`)
+	iconPlus     = lucide(`<path d="M5 12h14"/><path d="M12 5v14"/>`)
+	iconX        = lucide(`<path d="M18 6 6 18"/><path d="m6 6 12 12"/>`)
+	iconPlay     = lucide(`<polygon points="6 3 20 12 6 21 6 3"/>`)
+	iconStop     = lucide(`<rect width="14" height="14" x="5" y="5" rx="2"/>`)
+	iconTrash    = lucide(`<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>`)
+	iconArrow    = lucide(`<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>`)
+	iconEye      = lucide(`<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>`)
+	iconFolder   = lucide(`<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>`)
+	iconKanban   = lucide(`<path d="M6 5v11"/><path d="M12 5v6"/><path d="M18 5v14"/>`)
+	iconMerge    = lucide(`<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/>`)
+	iconRepeat   = lucide(`<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>`)
+	iconPR       = lucide(`<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/>`)
+	iconCode     = lucide(`<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>`)
+	iconTerminal = lucide(`<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>`)
+	iconBranch   = lucide(`<line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>`)
 )
 
 const (
@@ -771,7 +774,7 @@ func stat(c *ui.Context, p palette, label, value string) {
 }
 
 func pathLine(c *ui.Context, p palette, dir string) {
-	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Gap(6).Shrink(1).MinWidth(0).AlignItems(ui.Center).Children(func() {
 		ui.Icon(c, iconFolder).Size(12, 12).TextColor(p.muted)
 		ui.Text(c, dir).FontSize(11.5).Font("monospace").TextColor(p.muted).Selectable().MaxLines(1).Shrink(1).MinWidth(0)
 	})
@@ -850,10 +853,42 @@ func (b *board) detailView(c *ui.Context, p palette, task *Task) {
 				if button(c, p, "change-dir", "Change folder", nil, ghost).Tooltip("Choose the folder the agent works in").Clicked() {
 					b.chooseFolder(task.Dir, func(dir string) { b.setDir(task, dir) })
 				}
+				return
+			}
+			dir := task.Dir
+			if task.WS != nil {
+				dir = task.WS.Dir()
+			}
+			ui.Box(c).Grow(1)
+			for _, o := range []struct {
+				key, app string
+				icon     *ui.SVG
+			}{{"open-editor", editorApp(), iconCode}, {"open-terminal", terminalApp(), iconTerminal}} {
+				if button(c, p, o.key, "", o.icon, ghost).Label("Open in " + o.app).Tooltip("Open " + dir + " in " + o.app).Clicked() {
+					if err := openIn(o.app, dir); err != nil {
+						task.addLog("✗ opening it in " + o.app + ": " + err.Error())
+					}
+				}
 			}
 		})
 		if ws := task.WS; ws != nil {
-			branchLine(c, p, task)
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				branchLine(c, p, task)
+				if ws.Base == "" || task.Merged || task.Changes.Files == 0 || started(task) {
+					return
+				}
+				ui.Box(c).Grow(1)
+				label, tip := "Open PR", "Push "+ws.Branch+" and open a pull request into "+ws.Base
+				if task.PR != "" {
+					label, tip = "Update PR", "Push "+ws.Branch+" to "+task.PR
+				}
+				if task.pushing {
+					label = "Pushing…"
+				}
+				if buttonIf(c, p, "publish", label, iconPR, ghost, task.pushing).Tooltip(tip).Clicked() {
+					b.publish(task)
+				}
+			})
 		}
 		u := task.spent()
 		ui.Row(c).Gap(6).Children(func() {
@@ -1210,7 +1245,7 @@ var roundChoices = []string{"1 round", "2 rounds", "3 rounds"}
 // from, and how much it changed.
 func branchLine(c *ui.Context, p palette, t *Task) {
 	ws := t.WS
-	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Gap(6).Shrink(1).MinWidth(0).AlignItems(ui.Center).Children(func() {
 		ui.Icon(c, iconBranch).Size(12, 12).TextColor(p.muted)
 		base := ws.Base
 		if base == "" {
