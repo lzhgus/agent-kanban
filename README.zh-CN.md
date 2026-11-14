@@ -44,7 +44,7 @@ git 分支上工作。agent 可以先计划再动手、互相审查对方的工�
 
 **[下载最新版本](https://github.com/lzhgus/agent-kanban/releases/latest)**（macOS）：已签名并经 Apple 公证的通用版应用，
 同时支持 Apple Silicon 和 Intel 芯片，需要 macOS 12 或更新版本，大小约 10 MB。
-当前版本是 [`agent-kanban-0.1.3.dmg`](https://github.com/lzhgus/agent-kanban/releases/download/v0.1.3/agent-kanban-0.1.3.dmg)。
+当前版本是 [`agent-kanban-0.1.4.dmg`](https://github.com/lzhgus/agent-kanban/releases/download/v0.1.4/agent-kanban-0.1.4.dmg)。
 
 1. 打开 DMG，把 **Agent Kanban** 拖进“应用程序”文件夹。
 2. 从“应用程序”、Dock 或 Spotlight 打开。
@@ -140,10 +140,10 @@ Vibe Kanban 自己的 README 和文档（截至 2026-11-13），不是上手实�
 | 运行方式 | 原生 macOS 应用（已签名 DMG） | 在终端运行 `npx vibe-kanban` |
 | Agent | Claude Code、Grok Build、Pi、Kimi Code、OpenCode；Copilot CLI 和 Antigravity 测试中；Codex 只读查看 | Claude Code、Codex、Gemini CLI、GitHub Copilot、Amp、Cursor、OpenCode、Droid、CCR、Qwen Code |
 | 每个任务 | 一个 git worktree 和 `kanban/<id>-<title>` 分支 | 一个带分支、终端和 dev server 的 workspace |
-| 审查 | 由另一个 agent 审查计划或改动，循环到通过 | 看 diff、写行内评论，再开 PR |
+| 审查 | 由另一个 agent 审查计划或改动，循环到通过，再合并或开 PR | 看 diff、写行内评论，再开 PR |
 | agent 协作 | 通过内置 MCP server 派子任务、发消息、提问 | — |
 | 用量 | 每个任务的 token 和每个 agent 的套餐额度 | — |
-| 其他 | 定时任务、撤销一轮、终端会话只读显示 | 内置带 devtools 的浏览器预览；自动生成描述的 PR |
+| 其他 | 定时任务、撤销一轮、终端会话只读显示、每个 worktree 自动带上 `.env` 并运行 setup 脚本 | 内置带 devtools 的浏览器预览；自动生成描述的 PR |
 | 项目状态 | 早期，0.1.x | 其 README 写明项目正在停止维护（sunsetting） |
 
 “—”表示我们在对方文档里没找到，不代表没有。

@@ -50,7 +50,7 @@ your machine.
 **[Download the latest release](https://github.com/lzhgus/agent-kanban/releases/latest)** for macOS: a signed and
 notarized universal app (Apple Silicon and Intel) for macOS 12 or newer,
 about 10 MB. The current version is
-[`agent-kanban-0.1.3.dmg`](https://github.com/lzhgus/agent-kanban/releases/download/v0.1.3/agent-kanban-0.1.3.dmg).
+[`agent-kanban-0.1.4.dmg`](https://github.com/lzhgus/agent-kanban/releases/download/v0.1.4/agent-kanban-0.1.4.dmg).
 
 1. Open the DMG and drag **Agent Kanban** to Applications.
 2. Open it from Applications, the Dock or Spotlight.
@@ -166,10 +166,10 @@ differences below come from Vibe Kanban's own README and docs as of
 | How you run it | Native macOS app (signed DMG) | `npx vibe-kanban` from a terminal |
 | Agents | Claude Code, Grok Build, Pi, Kimi Code, OpenCode; Copilot CLI and Antigravity in testing; Codex watched read-only | Claude Code, Codex, Gemini CLI, GitHub Copilot, Amp, Cursor, OpenCode, Droid, CCR, Qwen Code |
 | Per task | A git worktree and `kanban/<id>-<title>` branch | A workspace with a branch, a terminal and a dev server |
-| Review | Another agent reviews a plan or changes, in a loop | Diff review with inline comments, then a pull request |
+| Review | Another agent reviews a plan or changes, in a loop, then merge or open a pull request | Diff review with inline comments, then a pull request |
 | Agents working together | Subtasks, messages and questions through a built-in MCP server | — |
 | Usage | Tokens per task and each agent's plan quota | — |
-| Extras | Schedules, undo a turn, terminal sessions shown read-only | Built-in browser preview with devtools; PRs with generated descriptions |
+| Extras | Schedules, undo a turn, terminal sessions shown read-only, `.env` files and a setup script in each worktree | Built-in browser preview with devtools; PRs with generated descriptions |
 | Project status | Early, 0.1.x | Its README says the project is sunsetting |
 
 "—" means we did not find it in their docs, not that it is missing.

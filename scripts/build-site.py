@@ -13,7 +13,7 @@ REPO = "https://github.com/lzhgus/agent-kanban"
 # Default download link: the DMG of the current release. The page asks the
 # GitHub API for the latest release when it loads and swaps in its DMG and
 # version, so this only matters if that call fails. Bump it on release.
-DMG_VERSION = "0.1.3"
+DMG_VERSION = "0.1.4"
 DMG_URL = f"{REPO}/releases/download/v{DMG_VERSION}/agent-kanban-{DMG_VERSION}.dmg"
 RELEASES_API = "https://api.github.com/repos/lzhgus/agent-kanban/releases/latest"
 
@@ -62,7 +62,7 @@ STRINGS = {
         "feat_kicker": "What it does", "feat_h": "Less terminal juggling. More shipped tasks.",
         "features": [
             ("chat", "Tasks are conversations", "Start a task, then reply to ask for changes. The agent picks up where it stopped, in the same session. Claude Code, Grok Build and Pi take your message while they work."),
-            ("branch", "A branch per task", "Every task works in its own worktree on a <code>kanban/&lt;id&gt;-&lt;title&gt;</code> branch. Each turn ends in a commit; review the diff and <b>Merge</b> when you're ready."),
+            ("branch", "A branch per task", "Every task works in its own worktree on a <code>kanban/&lt;id&gt;-&lt;title&gt;</code> branch. Each turn ends in a commit; review the diff, then <b>Merge</b> or <b>Open PR</b>. New worktrees get your <code>.env</code> files and run your setup script."),
             ("plan", "Plan first", "Start with a read-only planning turn. The plan waits for you to confirm or revise it before any code changes."),
             ("review", "AI review", "Have another agent review a plan or finished changes. The loop runs until the reviewer approves or your rounds run out. The decision stays yours."),
             ("mcp", "Agents work together", "A built-in local MCP server lets agents ask you a question, file tasks for other agents and read the board."),
@@ -138,7 +138,7 @@ STRINGS = {
         "feat_kicker": "功能", "feat_h": "少在终端之间来回切，多交付几个任务。",
         "features": [
             ("chat", "任务就是对话", "开一个任务，之后直接回复它提修改意见：agent 会在同一个会话里接着上次的地方继续。Claude Code、Grok Build 和 Pi 在干活时也能收到你的消息。"),
-            ("branch", "每个任务一个分支", "每个任务在自己的 worktree 里、<code>kanban/&lt;id&gt;-&lt;title&gt;</code> 分支上工作。每一轮以一次 commit 结束；看完 diff，准备好了再点 <b>Merge</b>。"),
+            ("branch", "每个任务一个分支", "每个任务在自己的 worktree 里、<code>kanban/&lt;id&gt;-&lt;title&gt;</code> 分支上工作。每一轮以一次 commit 结束；看完 diff，再点 <b>Merge</b> 或 <b>Open PR</b>。新 worktree 会自动带上你的 <code>.env</code> 文件并运行 setup 脚本。"),
             ("plan", "先计划", "任务可以从一轮只读的计划开始。计划等你确认或修改后，才会动代码。"),
             ("review", "AI 审查", "让另一个 agent 审查计划或完成的改动。任务的 agent 修改，循环直到审查通过或你设定的轮数用完。最终决定权在你。"),
             ("mcp", "agent 之间协作", "内置的本地 MCP 服务器让 agent 可以向你提问、给其他 agent 创建任务、读取看板。"),
